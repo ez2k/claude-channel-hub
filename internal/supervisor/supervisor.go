@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -331,12 +332,38 @@ func (s *Supervisor) ReadLog(botID string, lines int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read log: %w", err)
 	}
-	content := string(data)
+	// Strip ANSI escape codes from PTY output
+	content := stripANSI(string(data))
 	allLines := strings.Split(content, "\n")
-	if len(allLines) > lines {
-		allLines = allLines[len(allLines)-lines:]
+	// Remove empty lines from cleaned output
+	var cleaned []string
+	for _, line := range allLines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
 	}
-	return strings.Join(allLines, "\n"), nil
+	if len(cleaned) > lines {
+		cleaned = cleaned[len(cleaned)-lines:]
+	}
+	return strings.Join(cleaned, "\n"), nil
+}
+
+// ansiRe matches ESC followed by any non-letter chars, terminated by a letter or ~.
+// This catches CSI, OSC, and all other ANSI/VT escape sequences from PTY output.
+var ansiRe = regexp.MustCompile(`\x1b[^a-zA-Z~]*[a-zA-Z~]`)
+
+// stripANSI removes ANSI escape sequences, control characters, and cleans up PTY output.
+func stripANSI(s string) string {
+	result := ansiRe.ReplaceAllString(s, "")
+	// Remove control chars except newline
+	cleaned := strings.Map(func(r rune) rune {
+		if r == '\n' || r >= 32 {
+			return r
+		}
+		return -1
+	}, result)
+	return cleaned
 }
 
 func (s *Supervisor) logEvent(botID, action, detail string) {
