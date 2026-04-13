@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +55,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Config
 	mux.HandleFunc("/api/config", s.handleConfig)
+
+	// Access control is per-bot, handled via /api/bots/:id/access and /api/bots/:id/access/detect
 
 	// System
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -189,6 +193,18 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET/PUT/POST /api/bots/:id/access
+	if len(parts) == 2 && parts[1] == "access" {
+		s.handleBotAccess(w, r, botID)
+		return
+	}
+
+	// POST /api/bots/:id/access/detect
+	if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "access" && parts[2] == "detect" {
+		s.handleBotAccessDetect(w, r, botID)
+		return
+	}
+
 	http.Error(w, "not found", 404)
 }
 
@@ -286,6 +302,260 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"claude":     s.cfg.Claude,
 		"bots":       bots,
 		"channels":   s.cfg.Channels,
+	})
+}
+
+// --- Per-Bot Access Control API ---
+
+// accessPathForBot returns the access.json path for a given bot type.
+func accessPathForBot(botType string) string {
+	switch botType {
+	case "telegram":
+		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", "telegram", "access.json")
+	case "discord":
+		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", "discord", "access.json")
+	default:
+		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", botType, "access.json")
+	}
+}
+
+func (s *Server) findBotConfig(botID string) *config.BotConfig {
+	if s.cfg == nil {
+		return nil
+	}
+	for i := range s.cfg.Bots {
+		if s.cfg.Bots[i].ID == botID {
+			return &s.cfg.Bots[i]
+		}
+	}
+	return nil
+}
+
+func (s *Server) handleBotAccess(w http.ResponseWriter, r *http.Request, botID string) {
+	botCfg := s.findBotConfig(botID)
+	if botCfg == nil {
+		http.Error(w, "bot not found", 404)
+		return
+	}
+	accessPath := accessPathForBot(botCfg.Type)
+
+	switch r.Method {
+	case http.MethodGet:
+		data, err := os.ReadFile(accessPath)
+		if err != nil {
+			writeJSON(w, map[string]interface{}{"error": "access.json not found", "access": nil, "bot": botID})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+
+	case http.MethodPut:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body: "+err.Error(), 400)
+			return
+		}
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), 400)
+			return
+		}
+		os.MkdirAll(filepath.Dir(accessPath), 0700)
+		formatted, _ := json.MarshalIndent(parsed, "", "  ")
+		if err := os.WriteFile(accessPath, formatted, 0644); err != nil {
+			http.Error(w, "write: "+err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "saved", "bot": botID})
+
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body: "+err.Error(), 400)
+			return
+		}
+		var req struct {
+			Action  string `json:"action"`
+			ID      string `json:"id"`
+			Mention bool   `json:"require_mention"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), 400)
+			return
+		}
+
+		data, _ := os.ReadFile(accessPath)
+		var access map[string]interface{}
+		if err := json.Unmarshal(data, &access); err != nil {
+			access = map[string]interface{}{
+				"dmPolicy": "allowlist", "allowFrom": []interface{}{},
+				"groups": map[string]interface{}{}, "delivery": map[string]interface{}{},
+			}
+		}
+		if access["groups"] == nil {
+			access["groups"] = map[string]interface{}{}
+		}
+		if access["allowFrom"] == nil {
+			access["allowFrom"] = []interface{}{}
+		}
+
+		groups, _ := access["groups"].(map[string]interface{})
+		allowFrom, _ := access["allowFrom"].([]interface{})
+
+		switch req.Action {
+		case "add_group":
+			groups[req.ID] = map[string]interface{}{"allowFrom": []interface{}{}, "requireMention": req.Mention}
+			access["groups"] = groups
+		case "remove_group":
+			delete(groups, req.ID)
+			access["groups"] = groups
+		case "add_user":
+			found := false
+			for _, u := range allowFrom {
+				if u == req.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				access["allowFrom"] = append(allowFrom, req.ID)
+			}
+		case "remove_user":
+			var filtered []interface{}
+			for _, u := range allowFrom {
+				if u != req.ID {
+					filtered = append(filtered, u)
+				}
+			}
+			access["allowFrom"] = filtered
+		case "set_dm_policy":
+			access["dmPolicy"] = req.ID // reuse ID field for policy value
+		default:
+			http.Error(w, "unknown action: "+req.Action, 400)
+			return
+		}
+
+		formatted, _ := json.MarshalIndent(access, "", "  ")
+		os.MkdirAll(filepath.Dir(accessPath), 0700)
+		os.WriteFile(accessPath, formatted, 0644)
+		writeJSON(w, map[string]interface{}{"status": "updated", "bot": botID, "access": access})
+
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+func (s *Server) handleBotAccessDetect(w http.ResponseWriter, r *http.Request, botID string) {
+	botCfg := s.findBotConfig(botID)
+	if botCfg == nil {
+		http.Error(w, "bot not found", 404)
+		return
+	}
+	if botCfg.Type != "telegram" {
+		writeJSON(w, map[string]interface{}{"error": "detect only supported for telegram bots"})
+		return
+	}
+
+	// Stop the bot so we can call getUpdates
+	s.sv.RestartBot(botID)
+	time.Sleep(2 * time.Second)
+
+	resp, err := s.httpClient.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?limit=100&timeout=2", botCfg.Token))
+	if err != nil {
+		writeJSON(w, map[string]interface{}{"error": "getUpdates failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var tgResp struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message *struct {
+				Chat struct {
+					ID    int64  `json:"id"`
+					Title string `json:"title"`
+					Type  string `json:"type"`
+				} `json:"chat"`
+				From struct {
+					ID       int64  `json:"id"`
+					Username string `json:"username"`
+					Name     string `json:"first_name"`
+				} `json:"from"`
+			} `json:"message"`
+			MyChatMember *struct {
+				Chat struct {
+					ID    int64  `json:"id"`
+					Title string `json:"title"`
+					Type  string `json:"type"`
+				} `json:"chat"`
+			} `json:"my_chat_member"`
+		} `json:"result"`
+	}
+	json.Unmarshal(body, &tgResp)
+
+	// Load current access
+	accessPath := accessPathForBot(botCfg.Type)
+	accessData, _ := os.ReadFile(accessPath)
+	var access map[string]interface{}
+	json.Unmarshal(accessData, &access)
+	knownGroups := map[string]bool{}
+	if g, ok := access["groups"].(map[string]interface{}); ok {
+		for gid := range g {
+			knownGroups[gid] = true
+		}
+	}
+	knownUsers := map[string]bool{}
+	if u, ok := access["allowFrom"].([]interface{}); ok {
+		for _, uid := range u {
+			knownUsers[fmt.Sprint(uid)] = true
+		}
+	}
+
+	type detected struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Type  string `json:"type"`
+		Known bool   `json:"known"`
+	}
+	seen := map[string]bool{}
+	var detectedGroups []detected
+	var detectedUsers []detected
+
+	for _, u := range tgResp.Result {
+		if u.Message != nil {
+			chat := u.Message.Chat
+			cid := fmt.Sprintf("%d", chat.ID)
+			if !seen[cid] {
+				seen[cid] = true
+				if chat.Type == "group" || chat.Type == "supergroup" {
+					detectedGroups = append(detectedGroups, detected{ID: cid, Title: chat.Title, Type: chat.Type, Known: knownGroups[cid]})
+				} else if chat.Type == "private" {
+					from := u.Message.From
+					uid := fmt.Sprintf("%d", from.ID)
+					name := from.Name
+					if from.Username != "" {
+						name = "@" + from.Username
+					}
+					detectedUsers = append(detectedUsers, detected{ID: uid, Title: name, Type: "private", Known: knownUsers[uid]})
+				}
+			}
+		}
+		if u.MyChatMember != nil {
+			chat := u.MyChatMember.Chat
+			cid := fmt.Sprintf("%d", chat.ID)
+			if !seen[cid] && (chat.Type == "group" || chat.Type == "supergroup") {
+				seen[cid] = true
+				detectedGroups = append(detectedGroups, detected{ID: cid, Title: chat.Title, Type: chat.Type, Known: knownGroups[cid]})
+			}
+		}
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"bot":    botID,
+		"groups": detectedGroups,
+		"users":  detectedUsers,
+		"note":   "봇이 자동 재시작됩니다",
 	})
 }
 
@@ -797,6 +1067,7 @@ body {
   <div class="tab active" data-tab="bots">&#xBD07; &#xBAA9;&#xB85D;</div>
   <div class="tab" data-tab="events">&#xC774;&#xBCA4;&#xD2B8; &#xB85C;&#xADF8;</div>
   <div class="tab" data-tab="versions">&#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
+  <div class="tab" data-tab="access">&#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>
   <div class="tab" data-tab="config">&#xC124;&#xC815;</div>
   <div class="tab" data-tab="troubleshoot">&#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
 </nav>
@@ -862,6 +1133,51 @@ body {
         <input class="form-input" id="install-ver-input" type="text" placeholder="2.1.104">
       </div>
       <button class="btn-primary" onclick="installVersion()">&#xC124;&#xCE58;</button>
+    </div>
+  </div>
+
+  <!-- Access tab -->
+  <div class="tab-pane" id="pane-access">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">&#xBD07;&#xBCC4; &#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>
+      <div>
+        <select id="access-bot-select" onchange="loadAccessForBot()" style="padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3;margin-right:8px"></select>
+        <button onclick="detectGroups()" style="padding:6px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
+      </div>
+    </div>
+    <div id="detect-results" style="display:none;margin-bottom:16px"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card" style="padding:16px">
+        <h3 style="margin:0 0 12px;font-size:14px">&#xD5C8;&#xC6A9; &#xC0AC;&#xC6A9;&#xC790; (DM)</h3>
+        <div id="access-users"></div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <input id="new-user-id" placeholder="User ID" style="flex:1;padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
+          <button onclick="addUser()" style="padding:6px 12px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xCD94;&#xAC00;</button>
+        </div>
+      </div>
+
+      <div class="card" style="padding:16px">
+        <h3 style="margin:0 0 12px;font-size:14px">&#xD5C8;&#xC6A9; &#xADF8;&#xB8F9;</h3>
+        <div id="access-groups"></div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <input id="new-group-id" placeholder="Group Chat ID (&#xC608;: -100...)" style="flex:1;padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#8b949e;white-space:nowrap">
+            <input type="checkbox" id="new-group-mention"> &#xBA58;&#xC158; &#xD544;&#xC694;
+          </label>
+          <button onclick="addGroup()" style="padding:6px 12px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xCD94;&#xAC00;</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px">
+      <h3 style="margin:0 0 8px;font-size:14px">DM &#xC815;&#xCC45;</h3>
+      <select id="dm-policy" onchange="updateDmPolicy()" style="padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
+        <option value="allowlist">allowlist (&#xD5C8;&#xC6A9; &#xBAA9;&#xB85D;&#xB9CC;)</option>
+        <option value="pairing">pairing (&#xD398;&#xC5B4;&#xB9C1; &#xCF54;&#xB4DC;)</option>
+        <option value="disabled">disabled (DM &#xCC28;&#xB2E8;)</option>
+      </select>
+      <span id="dm-policy-status" style="margin-left:8px;font-size:12px;color:#8b949e"></span>
     </div>
   </div>
 
@@ -1287,6 +1603,7 @@ function loadBots() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       renderBots(data.bots || []);
+      initAccessBotSelect(data.bots || []);
       var bots    = data.bots || [];
       var failed  = bots.filter(function(b) { return b.state === 'failed'; }).length;
       var running = bots.filter(function(b) { return b.state === 'running'; }).length;
@@ -1318,8 +1635,188 @@ function loadConfig() {
     .catch(function() {});
 }
 
+// --- Access management (per-bot) ---
+var currentAccess = null;
+var currentAccessBot = '';
+
+function initAccessBotSelect(bots) {
+  var sel = document.getElementById('access-bot-select');
+  if (!sel || !bots) return;
+  sel.innerHTML = bots.map(function(b) {
+    return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + ' (' + esc(b.type) + ')</option>';
+  }).join('');
+  if (!currentAccessBot && bots.length > 0) currentAccessBot = bots[0].id;
+  sel.value = currentAccessBot;
+}
+
+function loadAccessForBot() {
+  var sel = document.getElementById('access-bot-select');
+  if (sel) currentAccessBot = sel.value;
+  loadAccess();
+}
+
+function loadAccess() {
+  if (!currentAccessBot) return;
+  fetch('/api/bots/' + currentAccessBot + '/access').then(function(r){return r.json()}).then(function(data) {
+    currentAccess = data;
+    var usersEl = document.getElementById('access-users');
+    var groupsEl = document.getElementById('access-groups');
+    var policyEl = document.getElementById('dm-policy');
+    if (!usersEl) return;
+
+    // DM policy
+    if (policyEl && data.dmPolicy) policyEl.value = data.dmPolicy;
+
+    // Users
+    var allowFrom = data.allowFrom || [];
+    if (allowFrom.length === 0) {
+      usersEl.innerHTML = '<div style="color:#8b949e;font-size:13px">허용된 사용자 없음</div>';
+    } else {
+      usersEl.innerHTML = allowFrom.map(function(uid) {
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+          + '<span style="font-family:monospace">' + esc(uid) + '</span>'
+          + '<button onclick="removeUser(\'' + esc(uid) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">삭제</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    // Groups
+    var groups = data.groups || {};
+    var gids = Object.keys(groups);
+    if (gids.length === 0) {
+      groupsEl.innerHTML = '<div style="color:#8b949e;font-size:13px">허용된 그룹 없음</div>';
+    } else {
+      groupsEl.innerHTML = gids.map(function(gid) {
+        var g = groups[gid];
+        var mention = g.requireMention ? '멘션 필요' : '모든 메시지';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+          + '<span><span style="font-family:monospace">' + esc(gid) + '</span> <span style="color:#8b949e;font-size:11px">(' + mention + ')</span></span>'
+          + '<button onclick="removeGroup(\'' + esc(gid) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">삭제</button>'
+          + '</div>';
+      }).join('');
+    }
+  }).catch(function(){});
+}
+
+function addUser() {
+  var uid = document.getElementById('new-user-id').value.trim();
+  if (!uid) return;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add_user', id:uid})
+  }).then(function(r){return r.json()}).then(function() {
+    document.getElementById('new-user-id').value = '';
+    loadAccess();
+  });
+}
+
+function removeUser(uid) {
+  if (!confirm(uid + ' 사용자를 제거하시겠습니까?')) return;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'remove_user', id:uid})
+  }).then(function(){loadAccess()});
+}
+
+function addGroup() {
+  var gid = document.getElementById('new-group-id').value.trim();
+  if (!gid) return;
+  var mention = document.getElementById('new-group-mention').checked;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add_group', id:gid, require_mention:mention})
+  }).then(function(r){return r.json()}).then(function() {
+    document.getElementById('new-group-id').value = '';
+    document.getElementById('new-group-mention').checked = false;
+    loadAccess();
+  });
+}
+
+function removeGroup(gid) {
+  if (!confirm(gid + ' 그룹을 제거하시겠습니까?')) return;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'remove_group', id:gid})
+  }).then(function(){loadAccess()});
+}
+
+function updateDmPolicy() {
+  var policy = document.getElementById('dm-policy').value;
+  if (!currentAccessBot) return;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'set_dm_policy', id:policy})
+  }).then(function() {
+    document.getElementById('dm-policy-status').textContent = '저장됨 ✓';
+    setTimeout(function(){ document.getElementById('dm-policy-status').textContent = ''; }, 2000);
+    loadAccess();
+  });
+}
+
+function detectGroups() {
+  if (!currentAccessBot) return;
+  var btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '감지 중... (봇 재시작됨)';
+  var resultsEl = document.getElementById('detect-results');
+  resultsEl.style.display = 'block';
+  resultsEl.innerHTML = '<div style="color:#8b949e">봇을 멈추고 대기 중인 메시지를 수집합니다...</div>';
+
+  fetch('/api/bots/' + currentAccessBot + '/access/detect', {method:'POST'})
+    .then(function(r){return r.json()})
+    .then(function(data) {
+      btn.disabled = false;
+      btn.textContent = '그룹/사용자 감지';
+      var html = '';
+      var groups = data.groups || [];
+      var users = data.users || [];
+
+      if (groups.length === 0 && users.length === 0) {
+        resultsEl.innerHTML = '<div class="card" style="padding:12px;color:#8b949e">감지된 그룹/사용자 없음. 봇에게 메시지를 보낸 후 다시 시도하세요.</div>';
+        return;
+      }
+
+      if (groups.length > 0) {
+        html += '<div class="card" style="padding:12px;margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">감지된 그룹</h4>';
+        groups.forEach(function(g) {
+          var badge = g.known ? '<span style="color:#3fb950;font-size:11px">등록됨</span>' : '<button onclick="addDetectedGroup(\'' + esc(g.id) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">허용</button>';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+            + '<span><span style="font-family:monospace;font-size:12px">' + esc(g.id) + '</span> <span style="color:#e6edf3">' + esc(g.title) + '</span> <span style="color:#8b949e;font-size:11px">(' + g.type + ')</span></span>'
+            + badge + '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (users.length > 0) {
+        html += '<div class="card" style="padding:12px"><h4 style="margin:0 0 8px;font-size:13px">감지된 사용자</h4>';
+        users.forEach(function(u) {
+          var badge = u.known ? '<span style="color:#3fb950;font-size:11px">등록됨</span>' : '<button onclick="addDetectedUser(\'' + esc(u.id) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">허용</button>';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+            + '<span><span style="font-family:monospace;font-size:12px">' + esc(u.id) + '</span> <span style="color:#e6edf3">' + esc(u.title) + '</span></span>'
+            + badge + '</div>';
+        });
+        html += '</div>';
+      }
+
+      resultsEl.innerHTML = html;
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.textContent = '그룹/사용자 감지';
+      resultsEl.innerHTML = '<div class="card" style="padding:12px;color:#f85149">감지 실패: ' + e + '</div>';
+    });
+}
+
+function addDetectedGroup(gid) {
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add_group', id:gid, require_mention:false})
+  }).then(function(){loadAccess(); detectGroups();});
+}
+
+function addDetectedUser(uid) {
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add_user', id:uid})
+  }).then(function(){loadAccess(); detectGroups();});
+}
+
 // Init and auto-refresh
 loadBots();
+loadAccess();
 setInterval(loadBots, 5000);
 setInterval(function() {
   if (document.getElementById('pane-events').classList.contains('active')) loadEvents();

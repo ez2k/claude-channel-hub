@@ -215,7 +215,7 @@ func (s *Supervisor) Status() []BotStatus {
 		}
 		if e.bot.Process != nil {
 			st.State = string(e.bot.Process.State())
-			st.Uptime = time.Since(e.bot.Process.StartedAt()).String()
+			st.Uptime = time.Since(e.bot.Process.StartedAt()).Truncate(time.Second).String()
 		} else {
 			st.State = "idle"
 		}
