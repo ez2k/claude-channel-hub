@@ -166,6 +166,11 @@ func (m *Manager) DefaultVersion() string {
 	return m.defaultVersion
 }
 
+// SystemVersion returns the version string of the system claude binary.
+func (m *Manager) SystemVersion() string {
+	return systemVersion()
+}
+
 // systemVersion returns the version of the system-installed claude binary.
 func systemVersion() string {
 	cmd := exec.Command("claude", "--version")

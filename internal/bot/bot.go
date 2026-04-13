@@ -2,9 +2,10 @@ package bot
 
 // Bot represents a platform bot (one token = one Claude Code process)
 type Bot struct {
-	Config   BotConfig
-	Channels []ChannelConfig // channels assigned to this bot
-	Process  *Process        // managed claude process (nil if not running)
+	Config         BotConfig
+	Channels       []ChannelConfig // channels assigned to this bot
+	Process        *Process        // managed claude process (nil if not running)
+	RunningVersion string          // claude version captured at process start
 }
 
 // BotConfig matches config.BotConfig but is self-contained

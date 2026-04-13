@@ -50,3 +50,14 @@ channels:
       model: ""
       system_prompt: ""
       data_dir: ./data/general
+    - id: claude-bot-default
+      bot: claude_bot
+      name: 클로드 봇 대화
+      match:
+        type: default
+        chat_ids: []
+        user_ids: []
+        topic_ids: []
+      model: ""
+      system_prompt: ""
+      data_dir: ./data/claude-bot

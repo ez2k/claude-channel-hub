@@ -148,7 +148,8 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 			log.Printf("❌ [%s] Failed to start: %v", entry.bot.Config.ID, err)
 			s.logEvent(entry.bot.Config.ID, "error", err.Error())
 		} else {
-			log.Printf("✅ [%s] Bot process started (pid %d)", entry.bot.Config.ID, entry.bot.Process.PID())
+			entry.bot.RunningVersion = s.versionMgr.SystemVersion()
+			log.Printf("✅ [%s] Bot process started (pid %d, claude %s)", entry.bot.Config.ID, entry.bot.Process.PID(), entry.bot.RunningVersion)
 			entry.bot.Process.Wait()
 		}
 
@@ -220,7 +221,9 @@ func (s *Supervisor) Status() []BotStatus {
 			Type:         e.bot.Config.Type,
 			Enabled:      e.bot.Config.Enabled,
 			RestartCount: e.restartCount,
-			ChannelCount: len(e.bot.Channels) + groupCount,
+			ChannelCount:  len(e.bot.Channels) + groupCount,
+			ClaudeVersion: e.bot.RunningVersion,
+			SystemVersion: s.versionMgr.SystemVersion(),
 		}
 		if e.bot.Process != nil {
 			st.State = string(e.bot.Process.State())
@@ -228,6 +231,7 @@ func (s *Supervisor) Status() []BotStatus {
 		} else {
 			st.State = "idle"
 		}
+		st.NeedsRestart = st.ClaudeVersion != "" && st.SystemVersion != "" && st.ClaudeVersion != st.SystemVersion
 		result = append(result, st)
 	}
 	return result
@@ -235,14 +239,17 @@ func (s *Supervisor) Status() []BotStatus {
 
 // BotStatus is a snapshot of a bot's current state.
 type BotStatus struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Enabled      bool   `json:"enabled"`
-	State        string `json:"state"`
-	Uptime       string `json:"uptime"`
-	RestartCount int    `json:"restart_count"`
-	ChannelCount int    `json:"channel_count"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Enabled       bool   `json:"enabled"`
+	State         string `json:"state"`
+	Uptime        string `json:"uptime"`
+	RestartCount  int    `json:"restart_count"`
+	ChannelCount  int    `json:"channel_count"`
+	ClaudeVersion string `json:"claude_version"`
+	SystemVersion string `json:"system_version"`
+	NeedsRestart  bool   `json:"needs_restart"`
 }
 
 // countAccessGroups reads the bot's access.json and returns the number of registered groups.

@@ -1492,6 +1492,10 @@ function renderBots(bots) {
           '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '\u2014') + '</div><div class="m-lbl">\uCC44\uB110</div></div>' +
         '</div>' +
         channelSection +
+        '<div style="padding:4px 16px;font-size:11px;color:#8b949e;display:flex;justify-content:space-between;align-items:center">' +
+          '<span>Claude ' + esc(b.claude_version || '-') + (b.needs_restart ? ' &#x2192; ' + esc(b.system_version) : '') + '</span>' +
+          (b.needs_restart ? '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')" style="font-size:10px;padding:1px 8px;background:#f0883e;border-color:#f0883e">&#xC5C5;&#xB370;&#xC774;&#xD2B8; &#xC7AC;&#xC2DC;&#xC791;</button>' : '') +
+        '</div>' +
         '<div class="bot-footer">' +
           '<span class="bot-type">' + esc(b.type || 'unknown') + '</span>' +
           '<div class="bot-actions">' +
