@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/your-org/claude-harness/internal/bot"
-	"github.com/your-org/claude-harness/internal/version"
+	"github.com/ez2k/claude-channel-hub/internal/bot"
+	"github.com/ez2k/claude-channel-hub/internal/version"
 )
 
 // Config for supervisor behavior
@@ -32,6 +34,7 @@ type botEntry struct {
 	bot          *bot.Bot
 	restartCount int
 	lastRestart  time.Time
+	restartCh    chan struct{} // manual restart signal
 }
 
 // Supervisor manages bot processes with health monitoring and auto-restart.
@@ -67,7 +70,7 @@ func New(cfg Config, versionMgr *version.Manager) *Supervisor {
 func (s *Supervisor) Register(b *bot.Bot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entries = append(s.entries, &botEntry{bot: b})
+	s.entries = append(s.entries, &botEntry{bot: b, restartCh: make(chan struct{}, 1)})
 	s.logEvent(b.Config.ID, "registered", "")
 }
 
@@ -158,6 +161,13 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 
 		select {
 		case <-time.After(delay):
+		case <-entry.restartCh:
+			// Manual restart — reset backoff
+			delay = s.config.RestartDelay
+			entry.restartCount = 0
+			attempt = 0 // will be incremented by loop
+			log.Printf("🔄 [%s] Manual restart triggered", entry.bot.Config.ID)
+			s.logEvent(entry.bot.Config.ID, "restarted", "manual restart — backoff reset")
 		case <-ctx.Done():
 			return
 		}
@@ -290,6 +300,43 @@ func (s *Supervisor) GetEvents(limit int) []Event {
 	result := make([]Event, limit)
 	copy(result, s.events[start:])
 	return result
+}
+
+// RestartBot signals the runBot goroutine for the given bot to restart immediately.
+// It does NOT spawn a new goroutine — the existing runBot loop handles the restart.
+func (s *Supervisor) RestartBot(botID string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.entries {
+		if e.bot.Config.ID == botID {
+			if e.bot.Process != nil {
+				e.bot.Process.Stop()
+			}
+			// Non-blocking send to signal runBot loop
+			select {
+			case e.restartCh <- struct{}{}:
+			default:
+			}
+			s.logEvent(botID, "restart_requested", "manual restart via API")
+			return nil
+		}
+	}
+	return fmt.Errorf("bot %s not found", botID)
+}
+
+// ReadLog returns the last N lines from a bot's log file.
+func (s *Supervisor) ReadLog(botID string, lines int) (string, error) {
+	logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", botID)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return "", fmt.Errorf("read log: %w", err)
+	}
+	content := string(data)
+	allLines := strings.Split(content, "\n")
+	if len(allLines) > lines {
+		allLines = allLines[len(allLines)-lines:]
+	}
+	return strings.Join(allLines, "\n"), nil
 }
 
 func (s *Supervisor) logEvent(botID, action, detail string) {

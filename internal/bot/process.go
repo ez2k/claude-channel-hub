@@ -136,7 +136,11 @@ func (p *Process) Start(ctx context.Context) error {
 
 	// Capture PTY output to log file for debugging
 	logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", p.bot.Config.ID)
-	logFile, _ := os.Create(logPath)
+	// Rotate if > 10MB
+	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
+		os.Rename(logPath, logPath+".1")
+	}
+	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	go func() {
 		if logFile != nil {
 			io.Copy(logFile, ptmx)

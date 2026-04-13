@@ -192,7 +192,7 @@ GET  /api/health              # 헬스체크
 Go 하네스 v2 데이터를 v4로 마이그레이션:
 
 ```bash
-bun scripts/migrate.ts --from ./data --to ~/.claude-harness/data
+bun scripts/migrate.ts --from ./data --to ~/.claude-channel-hub/data
 ```
 
 ## 프로젝트 구조

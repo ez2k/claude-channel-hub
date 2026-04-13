@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/claude-harness/internal/memory"
-	"github.com/your-org/claude-harness/internal/profile"
-	"github.com/your-org/claude-harness/internal/provider"
-	"github.com/your-org/claude-harness/internal/skills"
-	"github.com/your-org/claude-harness/internal/store"
-	"github.com/your-org/claude-harness/internal/tools"
+	"github.com/ez2k/claude-channel-hub/internal/memory"
+	"github.com/ez2k/claude-channel-hub/internal/profile"
+	"github.com/ez2k/claude-channel-hub/internal/provider"
+	"github.com/ez2k/claude-channel-hub/internal/skills"
+	"github.com/ez2k/claude-channel-hub/internal/store"
+	"github.com/ez2k/claude-channel-hub/internal/tools"
 )
 
 type Agent struct {

@@ -1,5 +1,5 @@
 bin/
-bot
+/bot
 data/
 .env
 *.exe

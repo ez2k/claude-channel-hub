@@ -9,7 +9,7 @@ supervisor:
 
 claude:
   default_version: "latest"
-  versions_dir: "${HOME}/.claude-harness/versions"
+  versions_dir: "${HOME}/.claude-channel-hub/versions"
   auto_update: false
 
 defaults:

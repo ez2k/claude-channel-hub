@@ -58,7 +58,7 @@ if (!TOKEN) {
   )
   process.exit(1)
 }
-const DATA_DIR = process.env.HARNESS_DATA_DIR || join(homedir(), '.claude-harness', 'data')
+const DATA_DIR = process.env.HARNESS_DATA_DIR || join(homedir(), '.claude-channel-hub', 'data')
 const memoryStore = new MemoryStore(DATA_DIR)
 const profileStore = new ProfileStore(DATA_DIR)
 loadChannelConfigs()

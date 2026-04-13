@@ -22,7 +22,7 @@ export class ProfileStore {
   private dataDir: string;
 
   constructor(dataDir?: string) {
-    this.dataDir = dataDir || process.env.HARNESS_DATA_DIR || join(homedir(), ".claude-harness", "data");
+    this.dataDir = dataDir || process.env.HARNESS_DATA_DIR || join(homedir(), ".claude-channel-hub", "data");
   }
 
   private profilePath(userId: string): string {

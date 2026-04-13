@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Data migration: Go Harness → Claude Harness v4
+ * Data migration: Go Harness → Claude Channel Hub
  *
- * Usage: bun scripts/migrate.ts --from ./data --to ~/.claude-harness/data
+ * Usage: bun scripts/migrate.ts --from ./data --to ~/.claude-channel-hub/data
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "fs"
 import { join, basename } from "path"
 
 const args = process.argv.slice(2)
 let fromDir = "./data"
-let toDir = join(process.env.HOME || "/root", ".claude-harness", "data")
+let toDir = join(process.env.HOME || "/root", ".claude-channel-hub", "data")
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--from" && args[i + 1]) fromDir = args[++i]

@@ -12,11 +12,11 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"github.com/your-org/claude-harness/internal/agent"
-	"github.com/your-org/claude-harness/internal/memory"
-	"github.com/your-org/claude-harness/internal/profile"
-	"github.com/your-org/claude-harness/internal/skills"
-	"github.com/your-org/claude-harness/internal/store"
+	"github.com/ez2k/claude-channel-hub/internal/agent"
+	"github.com/ez2k/claude-channel-hub/internal/memory"
+	"github.com/ez2k/claude-channel-hub/internal/profile"
+	"github.com/ez2k/claude-channel-hub/internal/skills"
+	"github.com/ez2k/claude-channel-hub/internal/store"
 )
 
 // AgentFactory creates a new agent instance

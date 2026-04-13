@@ -1,10 +1,10 @@
 .PHONY: build run dev clean add-skill docker-build docker-run
 
 build:
-	go build -o bin/claude-harness ./cmd/bot
+	go build -o bin/claude-channel-hub ./cmd/bot
 
 run: build
-	./bin/claude-harness -config configs/channels.yaml -data ./data
+	./bin/claude-channel-hub -config configs/channels.yaml -data ./data
 
 dev:
 	air -c .air.toml || go run ./cmd/bot -config configs/channels.yaml -data ./data
@@ -18,7 +18,7 @@ add-skill:
 	@echo "✅ Created skills/$(NAME)/SKILL.md"
 
 docker-build:
-	docker build -t claude-harness .
+	docker build -t claude-channel-hub .
 
 docker-run:
-	docker run --env-file .env -p 8080:8080 -v $$(pwd)/data:/app/data claude-harness
+	docker run --env-file .env -p 8080:8080 -v $$(pwd)/data:/app/data claude-channel-hub

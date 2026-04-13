@@ -4,8 +4,8 @@
 
 ```bash
 # 다운로드한 zip 파일 압축 해제
-unzip claude-harness.zip
-cd claude-harness
+unzip claude-channel-hub.zip
+cd claude-channel-hub
 ```
 
 ## 2단계: Go 모듈 초기화
@@ -13,7 +13,7 @@ cd claude-harness
 ```bash
 # 모듈 이름을 본인 레포로 변경 (선택)
 # go.mod의 module 경로를 원하는 이름으로 수정
-# 예: github.com/myname/claude-harness
+# 예: github.com/myname/claude-channel-hub
 
 # 의존성 다운로드
 go mod tidy
@@ -51,7 +51,7 @@ defaults:
 ## 5단계: Claude Code에서 열기
 
 ```bash
-cd claude-harness
+cd claude-channel-hub
 claude
 ```
 

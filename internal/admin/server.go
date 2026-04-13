@@ -4,23 +4,37 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/your-org/claude-harness/internal/store"
-	"github.com/your-org/claude-harness/internal/supervisor"
+	"github.com/ez2k/claude-channel-hub/internal/config"
+	"github.com/ez2k/claude-channel-hub/internal/store"
+	"github.com/ez2k/claude-channel-hub/internal/supervisor"
+	"github.com/ez2k/claude-channel-hub/internal/version"
 )
 
 type Server struct {
-	sv    *supervisor.Supervisor
-	store store.Store
-	addr  string
+	sv         *supervisor.Supervisor
+	store      store.Store
+	versionMgr *version.Manager
+	cfg        *config.Root
+	addr       string
+	httpClient *http.Client
 }
 
-func NewServer(addr string, sv *supervisor.Supervisor, st store.Store) *Server {
-	return &Server{sv: sv, store: st, addr: addr}
+func NewServer(addr string, sv *supervisor.Supervisor, st store.Store, vm *version.Manager, cfg *config.Root) *Server {
+	return &Server{
+		sv:         sv,
+		store:      st,
+		versionMgr: vm,
+		cfg:        cfg,
+		addr:       addr,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -35,6 +49,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Version info
 	mux.HandleFunc("/api/versions", s.handleVersions)
+	mux.HandleFunc("/api/versions/", s.handleVersions)
+
+	// Config
+	mux.HandleFunc("/api/config", s.handleConfig)
 
 	// System
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -99,8 +117,75 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 
 	// POST /api/bots/:id/restart
 	if r.Method == http.MethodPost && len(parts) == 2 && parts[1] == "restart" {
-		// TODO: implement per-bot restart in supervisor
-		writeJSON(w, map[string]string{"status": "restart requested", "bot": botID})
+		if err := s.sv.RestartBot(botID); err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "restart_requested", "bot": botID})
+		return
+	}
+
+	// GET /api/bots/:id/logs?lines=200
+	if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "logs" {
+		lines := 200
+		if l := r.URL.Query().Get("lines"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil && n > 0 {
+				if n > 1000 {
+					n = 1000
+				}
+				lines = n
+			}
+		}
+		content, err := s.sv.ReadLog(botID, lines)
+		if err != nil {
+			writeJSON(w, map[string]interface{}{"error": err.Error(), "logs": ""})
+			return
+		}
+		writeJSON(w, map[string]interface{}{"bot": botID, "lines": lines, "logs": content})
+		return
+	}
+
+	// GET /api/bots/:id/status
+	if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "status" {
+		var botCfg *config.BotConfig
+		if s.cfg != nil {
+			for i := range s.cfg.Bots {
+				if s.cfg.Bots[i].ID == botID {
+					botCfg = &s.cfg.Bots[i]
+					break
+				}
+			}
+		}
+		if botCfg == nil {
+			http.Error(w, "bot not found", 404)
+			return
+		}
+
+		result := map[string]interface{}{"bot": botID, "type": botCfg.Type}
+
+		switch botCfg.Type {
+		case "telegram":
+			resp, err := s.httpClient.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getMe", botCfg.Token))
+			if err != nil {
+				result["connected"] = false
+				result["error"] = err.Error()
+			} else {
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				result["connected"] = resp.StatusCode == 200
+				var tgResp map[string]interface{}
+				json.Unmarshal(body, &tgResp)
+				if r, ok := tgResp["result"].(map[string]interface{}); ok {
+					result["bot_username"] = r["username"]
+					result["bot_name"] = r["first_name"]
+				}
+			}
+		default:
+			result["connected"] = false
+			result["error"] = "status check not implemented for " + botCfg.Type
+		}
+
+		writeJSON(w, result)
 		return
 	}
 
@@ -117,11 +202,90 @@ func (s *Server) handleChannels(w http.ResponseWriter, r *http.Request) {
 // --- Version API ---
 
 func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
-	// TODO: wire to version.Manager when available
+	if s.versionMgr == nil {
+		writeJSON(w, map[string]interface{}{
+			"versions": []interface{}{},
+			"default":  "system",
+		})
+		return
+	}
+
+	// Determine sub-path for install/activate
+	subPath := strings.TrimPrefix(r.URL.Path, "/api/versions")
+	subPath = strings.Trim(subPath, "/")
+
+	if r.Method == http.MethodPost && subPath == "install" {
+		var body struct {
+			Version string `json:"version"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Version == "" {
+			http.Error(w, "version required", 400)
+			return
+		}
+		if err := s.versionMgr.Install(body.Version); err != nil {
+			writeJSON(w, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]interface{}{"status": "installed", "version": body.Version})
+		return
+	}
+
+	if r.Method == http.MethodPost && subPath == "activate" {
+		var body struct {
+			Version string `json:"version"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Version == "" {
+			http.Error(w, "version required", 400)
+			return
+		}
+		s.versionMgr.SetDefault(body.Version)
+		writeJSON(w, map[string]interface{}{
+			"status":  "activated",
+			"version": body.Version,
+			"note":    "in-memory only, restart will revert",
+		})
+		return
+	}
+
 	writeJSON(w, map[string]interface{}{
-		"versions": []map[string]interface{}{
-			{"version": "system", "active": true},
-		},
+		"versions": s.versionMgr.List(),
+		"default":  s.versionMgr.DefaultVersion(),
+	})
+}
+
+// --- Config API ---
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil {
+		writeJSON(w, map[string]interface{}{"error": "config not available"})
+		return
+	}
+	bots := make([]map[string]interface{}, len(s.cfg.Bots))
+	for i, b := range s.cfg.Bots {
+		token := "***"
+		if len(b.Token) > 10 {
+			token = b.Token[:5] + "..." + b.Token[len(b.Token)-4:]
+		}
+		bots[i] = map[string]interface{}{
+			"id":                 b.ID,
+			"type":               b.Type,
+			"name":               b.Name,
+			"enabled":            b.Enabled,
+			"token":              token,
+			"plugin":             b.Plugin,
+			"plugin_marketplace": b.PluginMarketplace,
+			"model":              b.Model,
+			"claude_version":     b.ClaudeVersion,
+		}
+	}
+	writeJSON(w, map[string]interface{}{
+		"admin":      s.cfg.Admin,
+		"supervisor": s.cfg.Supervisor,
+		"claude":     s.cfg.Claude,
+		"bots":       bots,
+		"channels":   s.cfg.Channels,
 	})
 }
 
@@ -186,7 +350,6 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(path)
 
 	if len(parts) == 0 {
-		// List all channels with conversations
 		channels, _ := s.store.ListChannels()
 		var result []map[string]interface{}
 		for _, ch := range channels {
@@ -204,7 +367,6 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	channelID := parts[0]
 
 	if len(parts) == 1 {
-		// List conversations for a channel
 		summaries, err := s.store.ListByChannel(channelID)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -230,7 +392,6 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get a single conversation
 	conv, err := s.store.Load(channelID, convID)
 	if err != nil || conv == nil {
 		http.Error(w, "conversation not found", 404)
@@ -281,7 +442,7 @@ const dashboardHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Harness v4.0 — 대시보드</title>
+<title>Claude Channel Hub &#x2014; &#xB300;&#xC2DC;&#xBCF4;&#xB4DC;</title>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -314,7 +475,6 @@ body {
   line-height: 1.5;
 }
 
-/* ── Header ── */
 .header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -329,135 +489,83 @@ body {
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-title { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
-.header-title span { color: var(--text2); font-weight: 400; font-size: 13px; margin-left: 4px; }
 .header-right { display: flex; align-items: center; gap: 12px; }
 .refresh-info { font-size: 12px; color: var(--text3); }
 #last-updated { color: var(--text2); }
 
 .health-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 20px;
-  border: 1px solid;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600;
+  padding: 4px 12px; border-radius: 20px; border: 1px solid;
 }
 .health-badge.healthy  { color: var(--green);  background: var(--green-bg);  border-color: rgba(63,185,80,.3); }
 .health-badge.degraded { color: var(--yellow); background: var(--yellow-bg); border-color: rgba(210,153,34,.3); }
 .health-badge.down     { color: var(--red);    background: var(--red-bg);    border-color: rgba(248,81,73,.3); }
 .health-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.health-badge.healthy .dot  { animation: pulse 2s infinite; }
+.health-badge.healthy .dot { animation: pulse 2s infinite; }
 
-@keyframes pulse {
-  0%,100% { opacity:1; }
-  50%      { opacity:.35; }
-}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-/* ── Tabs ── */
 .tabs {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 0 24px;
   display: flex;
-  gap: 0;
 }
 .tab {
-  padding: 12px 18px;
-  cursor: pointer;
-  color: var(--text2);
-  border-bottom: 2px solid transparent;
-  font-size: 13px;
-  font-weight: 500;
-  transition: color .15s, border-color .15s;
-  user-select: none;
+  padding: 12px 18px; cursor: pointer; color: var(--text2);
+  border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500;
+  transition: color .15s, border-color .15s; user-select: none;
 }
 .tab:hover  { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--blue); }
 
-/* ── Layout ── */
 .container { max-width: 1140px; margin: 0 auto; padding: 28px 24px; }
-
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
 
-/* ── Summary row ── */
 .summary-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 28px;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 12px; margin-bottom: 28px;
 }
 .summary-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 4px;
 }
-.summary-card .s-val {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
-}
-.summary-card .s-lbl {
-  font-size: 12px;
-  color: var(--text2);
-  font-weight: 500;
-}
-.summary-card.green .s-val { color: var(--green); }
+.summary-card .s-val { font-size: 28px; font-weight: 700; line-height: 1; }
+.summary-card .s-lbl { font-size: 12px; color: var(--text2); font-weight: 500; }
+.summary-card.green  .s-val { color: var(--green); }
 .summary-card.yellow .s-val { color: var(--yellow); }
-.summary-card.red .s-val { color: var(--red); }
-.summary-card.blue .s-val { color: var(--blue); }
+.summary-card.red    .s-val { color: var(--red); }
+.summary-card.blue   .s-val { color: var(--blue); }
 
-/* ── Section title ── */
 .section-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text3);
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  margin: 0 0 12px;
+  font-size: 11px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .8px; margin: 0 0 12px;
 }
 
-/* ── Bot grid ── */
 .bot-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr));
   gap: 14px;
 }
-
 .bot-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  transition: border-color .15s;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; transition: border-color .15s;
 }
 .bot-card:hover { border-color: #444c56; }
-
 .bot-card-header {
-  padding: 14px 16px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border2);
+  padding: 14px 16px; display: flex; align-items: flex-start;
+  justify-content: space-between; border-bottom: 1px solid var(--border2);
 }
 .bot-name-row { display: flex; flex-direction: column; gap: 3px; }
 .bot-name { font-size: 15px; font-weight: 600; }
 .bot-id   { font-size: 11px; color: var(--text3); font-family: monospace; }
 
 .state-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 20px;
-  border: 1px solid;
-  white-space: nowrap;
-  flex-shrink: 0;
+  font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 20px; border: 1px solid;
+  white-space: nowrap; flex-shrink: 0;
 }
 .state-badge.running { color: var(--green);  background: var(--green-bg);  border-color: rgba(63,185,80,.3); }
 .state-badge.failed  { color: var(--red);    background: var(--red-bg);    border-color: rgba(248,81,73,.3); }
@@ -465,14 +573,11 @@ body {
 .state-badge.stopped { color: var(--text2);  background: var(--surface2);  border-color: var(--border); }
 
 .bot-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0;
+  display: grid; grid-template-columns: repeat(3,1fr);
   border-bottom: 1px solid var(--border2);
 }
 .bot-metric {
-  padding: 10px 14px;
-  text-align: center;
+  padding: 10px 14px; text-align: center;
   border-right: 1px solid var(--border2);
 }
 .bot-metric:last-child { border-right: none; }
@@ -480,349 +585,750 @@ body {
 .bot-metric .m-lbl { font-size: 10px; color: var(--text2); margin-top: 1px; }
 
 .bot-footer {
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  padding: 10px 16px; display: flex;
+  align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
 }
+.bot-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.btn {
+  font-size: 11px; font-weight: 600; padding: 4px 10px;
+  border-radius: 5px; border: 1px solid; cursor: pointer;
+  transition: opacity .15s; background: transparent;
+}
+.btn:hover { opacity: .75; }
+.btn-restart  { color: var(--yellow); border-color: rgba(210,153,34,.4); }
+.btn-logs     { color: var(--blue);   border-color: rgba(88,166,255,.4); }
+.btn-status   { color: var(--green);  border-color: rgba(63,185,80,.4); }
+.btn-activate { color: var(--blue);   border-color: rgba(88,166,255,.4); }
+.btn-sm { font-size: 11px; padding: 3px 8px; }
+
 .bot-type {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--surface2);
-  color: var(--text2);
-  border: 1px solid var(--border);
-  font-family: monospace;
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: var(--surface2); color: var(--text2);
+  border: 1px solid var(--border); font-family: monospace;
 }
-.bot-channels-count { font-size: 12px; color: var(--text3); }
 
-/* channel sub-list inside bot card */
-.channel-list {
-  padding: 0 16px 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
+.channel-list { padding: 0 16px 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .ch-chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--blue-bg);
-  color: var(--blue);
-  border: 1px solid rgba(88,166,255,.2);
-  font-family: monospace;
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: var(--blue-bg); color: var(--blue);
+  border: 1px solid rgba(88,166,255,.2); font-family: monospace;
 }
 
-/* ── Events table ── */
 .events-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
 }
-.events-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
+.events-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .events-table th {
-  text-align: left;
-  padding: 10px 14px;
-  color: var(--text2);
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  font-size: 12px;
-  background: var(--surface2);
+  text-align: left; padding: 10px 14px; color: var(--text2);
+  border-bottom: 1px solid var(--border); font-weight: 600;
+  font-size: 12px; background: var(--surface2);
 }
 .events-table td {
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border2);
+  padding: 8px 14px; border-bottom: 1px solid var(--border2);
   vertical-align: middle;
 }
 .events-table tr:last-child td { border-bottom: none; }
 .events-table tr:hover td { background: var(--surface2); }
-.time-cell  { color: var(--text3); white-space: nowrap; font-size: 12px; font-family: monospace; }
-.id-cell    { color: var(--text2); font-family: monospace; font-size: 12px; }
+.time-cell { color: var(--text3); white-space: nowrap; font-size: 12px; font-family: monospace; }
+.id-cell   { color: var(--text2); font-family: monospace; font-size: 12px; }
 
 .ev-tag {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  text-transform: lowercase;
+  display: inline-block; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 4px; text-transform: lowercase;
 }
 .ev-tag.started   { color: var(--green);  background: var(--green-bg); }
 .ev-tag.stopped   { color: var(--yellow); background: var(--yellow-bg); }
 .ev-tag.failed,
 .ev-tag.error     { color: var(--red);    background: var(--red-bg); }
-.ev-tag.restarted { color: var(--blue);   background: var(--blue-bg); }
+.ev-tag.restarted,
+.ev-tag.restart_requested { color: var(--blue); background: var(--blue-bg); }
 .ev-tag.message   { color: var(--text2);  background: var(--surface2); }
 
-.empty-state {
-  padding: 48px;
-  text-align: center;
-  color: var(--text3);
-  font-size: 13px;
+.empty-state { padding: 48px; text-align: center; color: var(--text3); font-size: 13px; }
+
+/* Versions tab */
+.versions-grid {
+  display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.version-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+}
+.version-card.active-ver { border-color: rgba(63,185,80,.5); }
+.version-tag {
+  font-family: monospace; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.active-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.version-meta { font-size: 12px; color: var(--text3); margin-bottom: 10px; font-family: monospace; word-break: break-all; }
+
+.install-form {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+  display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+}
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 12px; color: var(--text2); font-weight: 500; }
+.form-input {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); padding: 6px 10px; border-radius: 5px;
+  font-size: 13px; width: 180px;
+}
+.form-input:focus { outline: none; border-color: var(--blue); }
+.btn-primary {
+  background: var(--blue); color: #fff; border: none;
+  padding: 7px 14px; border-radius: 5px; font-size: 13px;
+  font-weight: 600; cursor: pointer;
+}
+.btn-primary:hover { opacity: .85; }
+
+/* Config tab */
+.config-section {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+}
+.config-section-header {
+  padding: 12px 16px; background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; user-select: none;
+}
+.config-section-title { font-size: 13px; font-weight: 600; }
+.config-toggle { font-size: 11px; color: var(--text3); }
+.config-section-body.collapsed { display: none; }
+.config-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.config-table td { padding: 8px 16px; border-bottom: 1px solid var(--border2); }
+.config-table tr:last-child td { border-bottom: none; }
+.config-key { color: var(--text2); width: 40%; font-family: monospace; font-size: 12px; }
+.config-val { font-family: monospace; font-size: 12px; word-break: break-all; }
+.config-val.masked { color: var(--text3); }
+
+/* Troubleshoot tab */
+.ts-select-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
+}
+.ts-select {
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); padding: 7px 12px; border-radius: 5px; font-size: 13px;
+}
+.ts-auto-label {
+  font-size: 12px; color: var(--text2);
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+}
+.ts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ts-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.ts-card-header {
+  padding: 10px 14px; background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; color: var(--text2);
+}
+.ts-card-body { padding: 14px; }
+.log-pre {
+  font-family: monospace; font-size: 11px; color: var(--text2);
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 300px; overflow-y: auto;
+  background: var(--bg); padding: 10px; border-radius: 5px;
+  border: 1px solid var(--border2);
+}
+.conn-status { font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.conn-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+.conn-dot.ok  { background: var(--green); }
+.conn-dot.err { background: var(--red); }
+
+/* Modal */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.65); z-index: 200;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); width: 90vw; max-width: 860px;
+  max-height: 85vh; display: flex; flex-direction: column;
+}
+.modal-header {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title { font-size: 14px; font-weight: 600; }
+.modal-close {
+  background: none; border: none; color: var(--text2);
+  font-size: 18px; cursor: pointer; padding: 2px 6px;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+.modal-log {
+  font-family: monospace; font-size: 12px; color: var(--text2);
+  white-space: pre-wrap; word-break: break-all;
+  background: var(--bg); padding: 12px; border-radius: 5px;
+  border: 1px solid var(--border2); min-height: 200px;
 }
 
 @media (max-width: 700px) {
-  .summary-row { grid-template-columns: repeat(2, 1fr); }
+  .summary-row { grid-template-columns: repeat(2,1fr); }
   .bot-grid    { grid-template-columns: 1fr; }
   .container   { padding: 16px; }
+  .ts-grid     { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
 
-<!-- ═══ Header ═══ -->
 <header class="header">
   <div class="header-left">
-    <div class="header-title">🤖 Claude Harness <span>v4.0</span></div>
+    <div class="header-title">&#x1F916; Claude Channel Hub</div>
   </div>
   <div class="header-right">
-    <span class="refresh-info">마지막 갱신: <span id="last-updated">—</span></span>
-    <span class="health-badge healthy" id="health-badge"><span class="dot"></span><span id="health-text">정상</span></span>
+    <span class="refresh-info">&#xB9C8;&#xC9C0;&#xB9C9; &#xAC31;&#xC2E0;: <span id="last-updated">&#x2014;</span></span>
+    <span class="health-badge healthy" id="health-badge">
+      <span class="dot"></span><span id="health-text">&#xC815;&#xC0C1;</span>
+    </span>
   </div>
 </header>
 
-<!-- ═══ Tabs ═══ -->
 <nav class="tabs">
-  <div class="tab active" data-tab="bots">봇 목록</div>
-  <div class="tab"        data-tab="events">이벤트 로그</div>
+  <div class="tab active" data-tab="bots">&#xBD07; &#xBAA9;&#xB85D;</div>
+  <div class="tab" data-tab="events">&#xC774;&#xBCA4;&#xD2B8; &#xB85C;&#xADF8;</div>
+  <div class="tab" data-tab="versions">&#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
+  <div class="tab" data-tab="config">&#xC124;&#xC815;</div>
+  <div class="tab" data-tab="troubleshoot">&#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
 </nav>
 
-<!-- ═══ Main ═══ -->
 <main class="container">
 
   <!-- Bots tab -->
   <div class="tab-pane active" id="pane-bots">
-    <!-- Summary row -->
     <div class="summary-row">
       <div class="summary-card blue">
-        <div class="s-val" id="sum-total">—</div>
-        <div class="s-lbl">전체 봇</div>
+        <div class="s-val" id="sum-total">&#x2014;</div>
+        <div class="s-lbl">&#xC804;&#xCCB4; &#xBD07;</div>
       </div>
       <div class="summary-card green">
-        <div class="s-val" id="sum-running">—</div>
-        <div class="s-lbl">실행 중</div>
+        <div class="s-val" id="sum-running">&#x2014;</div>
+        <div class="s-lbl">&#xC2E4;&#xD589; &#xC911;</div>
       </div>
       <div class="summary-card red">
-        <div class="s-val" id="sum-failed">—</div>
-        <div class="s-lbl">오류</div>
+        <div class="s-val" id="sum-failed">&#x2014;</div>
+        <div class="s-lbl">&#xC624;&#xB958;</div>
       </div>
       <div class="summary-card yellow">
-        <div class="s-val" id="sum-channels">—</div>
-        <div class="s-lbl">전체 채널</div>
+        <div class="s-val" id="sum-channels">&#x2014;</div>
+        <div class="s-lbl">&#xC804;&#xCCB4; &#xCC44;&#xB110;</div>
       </div>
     </div>
-
-    <div class="section-title">봇 상태</div>
+    <div class="section-title">&#xBD07; &#xC0C1;&#xD0DC;</div>
     <div class="bot-grid" id="bot-grid">
-      <div class="empty-state">데이터 로딩 중…</div>
+      <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
     </div>
   </div>
 
   <!-- Events tab -->
   <div class="tab-pane" id="pane-events">
-    <div class="section-title">최근 이벤트 (최대 20개)</div>
+    <div class="section-title">&#xCD5C;&#xADFC; &#xC774;&#xBCA4;&#xD2B8; (&#xCD5C;&#xB300; 50&#xAC1C;)</div>
     <div class="events-card">
       <table class="events-table">
         <thead>
           <tr>
-            <th style="width:90px">시간</th>
-            <th style="width:110px">경과</th>
-            <th style="width:160px">봇 / 채널</th>
-            <th style="width:90px">액션</th>
-            <th>상세</th>
+            <th style="width:90px">&#xC2DC;&#xAC04;</th>
+            <th style="width:110px">&#xACBD;&#xACFC;</th>
+            <th style="width:160px">&#xBD07; / &#xCC44;&#xB110;</th>
+            <th style="width:130px">&#xC561;&#xC158;</th>
+            <th>&#xC0C1;&#xC138;</th>
           </tr>
         </thead>
         <tbody id="events-body">
-          <tr><td colspan="5" class="empty-state">이벤트 없음</td></tr>
+          <tr><td colspan="5" class="empty-state">&#xC774;&#xBCA4;&#xD2B8; &#xC5C6;&#xC74C;</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
+  <!-- Versions tab -->
+  <div class="tab-pane" id="pane-versions">
+    <div class="section-title">Claude Code &#xBC84;&#xC804;</div>
+    <div class="versions-grid" id="versions-grid">
+      <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
+    </div>
+    <div class="install-form">
+      <div class="form-group">
+        <label class="form-label" for="install-ver-input">&#xBC84;&#xC804; &#xBC88;&#xD638; (&#xC608;: 2.1.104)</label>
+        <input class="form-input" id="install-ver-input" type="text" placeholder="2.1.104">
+      </div>
+      <button class="btn-primary" onclick="installVersion()">&#xC124;&#xCE58;</button>
+    </div>
+  </div>
+
+  <!-- Config tab -->
+  <div class="tab-pane" id="pane-config">
+    <div class="section-title">&#xD604;&#xC7AC; &#xC124;&#xC815; (&#xC77D;&#xAE30; &#xC804;&#xC6A9;)</div>
+    <div id="config-content">
+      <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
+    </div>
+  </div>
+
+  <!-- Troubleshoot tab -->
+  <div class="tab-pane" id="pane-troubleshoot">
+    <div class="ts-select-row">
+      <select class="ts-select" id="ts-bot-select" onchange="loadTroubleshoot()">
+        <option value="">&#xBD07; &#xC120;&#xD0DD;&#x2026;</option>
+      </select>
+      <label class="ts-auto-label">
+        <input type="checkbox" id="ts-auto" checked onchange="toggleTsAuto()">
+        5&#xCD08; &#xC790;&#xB3D9; &#xAC31;&#xC2E0;
+      </label>
+      <button class="btn btn-logs btn-sm" onclick="loadTroubleshoot()">&#xC218;&#xB3D9; &#xAC31;&#xC2E0;</button>
+    </div>
+    <div class="ts-grid" id="ts-grid">
+      <div class="empty-state" style="grid-column:1/-1">&#xBD07;&#xC744; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
+    </div>
+  </div>
+
 </main>
+
+<!-- Log Modal -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="logTitle">&#xB85C;&#xADF8;</div>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-log" id="logContent">&#xB85C;&#xB529; &#xC911;&#x2026;</pre>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
-  'use strict';
+'use strict';
 
-  // ── Tab switching ──
-  document.querySelectorAll('.tab').forEach(function(tab) {
-    tab.addEventListener('click', function() {
-      var name = tab.dataset.tab;
-      document.querySelectorAll('.tab').forEach(function(t) {
-        t.classList.toggle('active', t.dataset.tab === name);
-      });
-      document.querySelectorAll('.tab-pane').forEach(function(p) {
-        p.classList.toggle('active', p.id === 'pane-' + name);
-      });
-      if (name === 'events') loadEvents();
+// Tab switching
+document.querySelectorAll('.tab').forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    var name = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(function(t) {
+      t.classList.toggle('active', t.dataset.tab === name);
     });
+    document.querySelectorAll('.tab-pane').forEach(function(p) {
+      p.classList.toggle('active', p.id === 'pane-' + name);
+    });
+    if (name === 'events')       loadEvents();
+    if (name === 'versions')     loadVersions();
+    if (name === 'config')       loadConfig();
+    if (name === 'troubleshoot') initTroubleshoot();
   });
+});
 
-  // ── Helpers ──
-  function esc(s) {
-    var d = document.createElement('div');
-    d.textContent = String(s == null ? '' : s);
-    return d.innerHTML;
+// Helpers
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = String(s == null ? '' : s);
+  return d.innerHTML;
+}
+
+function relTime(isoStr) {
+  if (!isoStr) return '';
+  var diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
+  if (diff < 5)    return '\uBC29\uAE08';
+  if (diff < 60)   return Math.floor(diff) + '\uCD08 \uC804';
+  if (diff < 3600) return Math.floor(diff / 60) + '\uBD84 \uC804';
+  if (diff < 86400) return Math.floor(diff / 3600) + '\uC2DC\uAC04 \uC804';
+  return Math.floor(diff / 86400) + '\uC77C \uC804';
+}
+
+function timeStr(isoStr) {
+  if (!isoStr) return '';
+  try { return new Date(isoStr).toLocaleTimeString('ko-KR'); } catch(e) { return isoStr; }
+}
+
+function stateClass(state) {
+  if (state === 'running') return 'running';
+  if (state === 'failed')  return 'failed';
+  return 'stopped';
+}
+
+function stateLabel(state) {
+  var map = {
+    running: '\uC2E4\uD589 \uC911',
+    failed:  '\uC624\uB958',
+    idle:    '\uC720\uD734',
+    stopped: '\uC911\uC9C0\uB428'
+  };
+  return map[state] || state || '\u2014';
+}
+
+// Bots
+function renderBots(bots) {
+  var grid = document.getElementById('bot-grid');
+  if (!bots || !bots.length) {
+    grid.innerHTML = '<div class="empty-state">\uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.</div>';
+    return;
   }
+  var totalChannels = 0, running = 0, failed = 0;
+  bots.forEach(function(b) {
+    if (b.state === 'running') running++;
+    if (b.state === 'failed')  failed++;
+    totalChannels += (b.channel_count || 0);
+  });
+  document.getElementById('sum-total').textContent    = bots.length;
+  document.getElementById('sum-running').textContent  = running;
+  document.getElementById('sum-failed').textContent   = failed;
+  document.getElementById('sum-channels').textContent = totalChannels;
 
-  function relTime(isoStr) {
-    if (!isoStr) return '';
-    var diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
-    if (diff < 5)   return '방금';
-    if (diff < 60)  return Math.floor(diff) + '초 전';
-    if (diff < 3600) return Math.floor(diff / 60) + '분 전';
-    if (diff < 86400) return Math.floor(diff / 3600) + '시간 전';
-    return Math.floor(diff / 86400) + '일 전';
-  }
-
-  function timeStr(isoStr) {
-    if (!isoStr) return '';
-    try { return new Date(isoStr).toLocaleTimeString('ko-KR'); } catch(e) { return isoStr; }
-  }
-
-  function stateClass(state) {
-    if (state === 'running') return 'running';
-    if (state === 'failed')  return 'failed';
-    return 'stopped';
-  }
-
-  function stateLabel(state) {
-    var map = { running: '실행 중', failed: '오류', idle: '유휴', stopped: '중지됨' };
-    return map[state] || state || '—';
-  }
-
-  // ── Render bots ──
-  function renderBots(bots) {
-    var grid = document.getElementById('bot-grid');
-    if (!bots || !bots.length) {
-      grid.innerHTML = '<div class="empty-state">봇이 없습니다.</div>';
-      return;
-    }
-
-    var totalChannels = 0;
-    var running = 0, failed = 0;
-    bots.forEach(function(b) {
-      if (b.state === 'running') running++;
-      if (b.state === 'failed')  failed++;
-      totalChannels += (b.channel_count || 0);
-    });
-
-    document.getElementById('sum-total').textContent    = bots.length;
-    document.getElementById('sum-running').textContent  = running;
-    document.getElementById('sum-failed').textContent   = failed;
-    document.getElementById('sum-channels').textContent = totalChannels;
-
-    grid.innerHTML = bots.map(function(b) {
-      var cls   = stateClass(b.state);
-      var label = stateLabel(b.state);
-      var name  = esc(b.name || b.id || '(unnamed)');
-      var id    = b.name ? esc(b.id) : '';
-
-      var channels = (b.channels || []).map(function(ch) {
-        return '<span class="ch-chip">' + esc(ch.id || ch) + '</span>';
-      }).join('');
-      var channelSection = channels
-        ? '<div class="channel-list">' + channels + '</div>'
-        : '';
-
-      return [
-        '<div class="bot-card">',
-          '<div class="bot-card-header">',
-            '<div class="bot-name-row">',
-              '<div class="bot-name">' + name + '</div>',
-              id ? '<div class="bot-id">' + id + '</div>' : '',
-            '</div>',
-            '<span class="state-badge ' + cls + '">' + label + '</span>',
-          '</div>',
-          '<div class="bot-metrics">',
-            '<div class="bot-metric"><div class="m-val">' + esc(b.uptime || '—') + '</div><div class="m-lbl">업타임</div></div>',
-            '<div class="bot-metric"><div class="m-val">' + esc(b.restart_count != null ? b.restart_count : '—') + '</div><div class="m-lbl">재시작</div></div>',
-            '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '—') + '</div><div class="m-lbl">채널</div></div>',
-          '</div>',
-          channelSection,
-          '<div class="bot-footer">',
-            '<span class="bot-type">' + esc(b.type || 'unknown') + '</span>',
-            b.channel_count ? '<span class="bot-channels-count">' + esc(b.channel_count) + '개 채널 활성</span>' : '',
-          '</div>',
-        '</div>',
-      ].join('');
+  grid.innerHTML = bots.map(function(b) {
+    var cls   = stateClass(b.state);
+    var label = stateLabel(b.state);
+    var name  = esc(b.name || b.id || '(unnamed)');
+    var id    = b.name ? esc(b.id) : '';
+    var bid   = esc(b.id);
+    var channels = (b.channels || []).map(function(ch) {
+      return '<span class="ch-chip">' + esc(ch.id || ch) + '</span>';
     }).join('');
-  }
+    var channelSection = channels ? '<div class="channel-list">' + channels + '</div>' : '';
 
-  // ── Render events ──
-  function renderEvents(events) {
-    var tbody = document.getElementById('events-body');
-    var list  = (events || []).slice().reverse().slice(0, 20);
-    if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">이벤트 없음</td></tr>';
-      return;
-    }
-    tbody.innerHTML = list.map(function(ev) {
-      var action = (ev.action || 'message').toLowerCase();
-      var tagCls = ['started','stopped','failed','error','restarted'].indexOf(action) >= 0 ? action : 'message';
-      return [
-        '<tr>',
-          '<td class="time-cell">'    + esc(timeStr(ev.time)) + '</td>',
-          '<td class="time-cell">'    + esc(relTime(ev.time)) + '</td>',
-          '<td class="id-cell">'      + esc(ev.bot_id || ev.channel_id || '—') + '</td>',
-          '<td><span class="ev-tag ' + tagCls + '">' + esc(action) + '</span></td>',
-          '<td>'                      + esc(ev.detail || '') + '</td>',
-        '</tr>',
-      ].join('');
-    }).join('');
-  }
+    return (
+      '<div class="bot-card">' +
+        '<div class="bot-card-header">' +
+          '<div class="bot-name-row">' +
+            '<div class="bot-name">' + name + '</div>' +
+            (id ? '<div class="bot-id">' + id + '</div>' : '') +
+          '</div>' +
+          '<span class="state-badge ' + cls + '">' + label + '</span>' +
+        '</div>' +
+        '<div class="bot-metrics">' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.uptime || '\u2014') + '</div><div class="m-lbl">\uC5C5\uD0C0\uC784</div></div>' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.restart_count != null ? b.restart_count : '\u2014') + '</div><div class="m-lbl">\uC7AC\uC2DC\uC791</div></div>' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '\u2014') + '</div><div class="m-lbl">\uCC44\uB110</div></div>' +
+        '</div>' +
+        channelSection +
+        '<div class="bot-footer">' +
+          '<span class="bot-type">' + esc(b.type || 'unknown') + '</span>' +
+          '<div class="bot-actions">' +
+            '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
+            '<button class="btn btn-logs"    onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</button>' +
+            '<button class="btn btn-status"  onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
 
-  // ── Update health badge ──
-  function updateHealth(status) {
-    var badge = document.getElementById('health-badge');
-    var text  = document.getElementById('health-text');
-    var map   = { healthy: ['healthy','정상'], degraded: ['degraded','일부 오류'], down: ['down','다운'] };
-    var info  = map[status] || map['healthy'];
-    badge.className = 'health-badge ' + info[0];
-    text.textContent = info[1];
+// Events
+function renderEvents(events) {
+  var tbody = document.getElementById('events-body');
+  var list  = (events || []).slice().reverse().slice(0, 50);
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">\uC774\uBCA4\uD2B8 \uC5C6\uC74C</td></tr>';
+    return;
   }
+  tbody.innerHTML = list.map(function(ev) {
+    var action = (ev.action || 'message').toLowerCase();
+    var tagCls = ['started','stopped','failed','error','restarted','restart_requested'].indexOf(action) >= 0 ? action : 'message';
+    return (
+      '<tr>' +
+        '<td class="time-cell">' + esc(timeStr(ev.time)) + '</td>' +
+        '<td class="time-cell">' + esc(relTime(ev.time)) + '</td>' +
+        '<td class="id-cell">'  + esc(ev.bot_id || ev.channel_id || '\u2014') + '</td>' +
+        '<td><span class="ev-tag ' + tagCls + '">' + esc(action) + '</span></td>' +
+        '<td>' + esc(ev.detail || '') + '</td>' +
+      '</tr>'
+    );
+  }).join('');
+}
 
-  // ── Fetch helpers ──
-  function loadBots() {
-    fetch('/api/bots')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        renderBots(data.bots || []);
-        // derive health from bot states
-        var bots = data.bots || [];
-        var failed  = bots.filter(function(b) { return b.state === 'failed'; }).length;
-        var running = bots.filter(function(b) { return b.state === 'running'; }).length;
-        var health  = failed > 0 ? 'degraded' : (running === 0 && bots.length > 0 ? 'down' : 'healthy');
-        updateHealth(health);
-        document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('ko-KR');
-      })
-      .catch(function() {
-        updateHealth('down');
+// Versions
+function renderVersions(data) {
+  var grid = document.getElementById('versions-grid');
+  var list = data.versions || [];
+  if (!list.length) {
+    grid.innerHTML = '<div class="empty-state">\uC124\uCE58\uB41C \uBC84\uC804 \uC5C6\uC74C</div>';
+    return;
+  }
+  grid.innerHTML = list.map(function(v) {
+    var isActive = v.active;
+    var cardCls  = isActive ? 'version-card active-ver' : 'version-card';
+    var activateBtn = isActive ? '' : '<button class="btn btn-activate btn-sm" onclick="activateVersion(\'' + esc(v.version) + '\')">\uD65C\uC131\uD654</button>';
+    return (
+      '<div class="' + cardCls + '">' +
+        '<div class="version-tag">' +
+          (isActive ? '<span class="active-dot"></span>' : '') +
+          esc(v.version) +
+          (v.system ? ' <span style="font-size:10px;color:var(--text3)">(system)</span>' : '') +
+        '</div>' +
+        '<div class="version-meta">' + esc(v.path || '') + '</div>' +
+        activateBtn +
+      '</div>'
+    );
+  }).join('');
+}
+
+// Config
+function renderConfig(data) {
+  var el = document.getElementById('config-content');
+  var sections = [
+    { key: 'admin',      label: 'Admin' },
+    { key: 'supervisor', label: 'Supervisor' },
+    { key: 'claude',     label: 'Claude' },
+    { key: 'bots',       label: '\uBD07 (\uD1A0\uD070 \uB9C8\uC2A4\uD0B9)' },
+    { key: 'channels',   label: '\uCC44\uB110' },
+  ];
+  el.innerHTML = sections.map(function(sec) {
+    var val = data[sec.key];
+    var rows = '';
+    if (Array.isArray(val)) {
+      val.forEach(function(item) {
+        Object.keys(item).forEach(function(k) {
+          var isMasked = (k === 'token');
+          rows += '<tr><td class="config-key">' + esc((item.id || '') + '.' + k) + '</td>' +
+                  '<td class="config-val' + (isMasked ? ' masked' : '') + '">' +
+                  esc(item[k] != null ? String(item[k]) : '') + '</td></tr>';
+        });
       });
-  }
-
-  function loadEvents() {
-    fetch('/api/events')
-      .then(function(r) { return r.json(); })
-      .then(function(data) { renderEvents(data.events || []); })
-      .catch(function() {});
-  }
-
-  // ── Init & auto-refresh ──
-  loadBots();
-  setInterval(loadBots, 10000);
-  // refresh events too if that tab is active
-  setInterval(function() {
-    if (document.getElementById('pane-events').classList.contains('active')) {
-      loadEvents();
+    } else if (val && typeof val === 'object') {
+      Object.keys(val).forEach(function(k) {
+        rows += '<tr><td class="config-key">' + esc(k) + '</td>' +
+                '<td class="config-val">' + esc(val[k] != null ? String(val[k]) : '') + '</td></tr>';
+      });
     }
-  }, 10000);
+    return (
+      '<div class="config-section">' +
+        '<div class="config-section-header" onclick="toggleSection(this)">' +
+          '<span class="config-section-title">' + esc(sec.label) + '</span>' +
+          '<span class="config-toggle">\u25BC</span>' +
+        '</div>' +
+        '<div class="config-section-body">' +
+          '<table class="config-table"><tbody>' + rows + '</tbody></table>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+window.toggleSection = function(header) {
+  var body = header.nextElementSibling;
+  body.classList.toggle('collapsed');
+  var icon = header.querySelector('.config-toggle');
+  icon.textContent = body.classList.contains('collapsed') ? '\u25BA' : '\u25BC';
+};
+
+// Troubleshoot
+function initTroubleshoot() {
+  fetch('/api/bots')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var sel  = document.getElementById('ts-bot-select');
+      var bots = data.bots || [];
+      sel.innerHTML = '<option value="">\uBD07 \uC120\uD0DD\u2026</option>' +
+        bots.map(function(b) {
+          return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + '</option>';
+        }).join('');
+    });
+}
+
+window.loadTroubleshoot = function() {
+  var botId = document.getElementById('ts-bot-select').value;
+  if (!botId) return;
+  var grid = document.getElementById('ts-grid');
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">\uB85C\uB529 \uC911\u2026</div>';
+
+  Promise.all([
+    fetch('/api/bots/' + encodeURIComponent(botId) + '/status').then(function(r) { return r.json(); }),
+    fetch('/api/bots/' + encodeURIComponent(botId) + '/logs?lines=50').then(function(r) { return r.json(); }),
+    fetch('/api/events').then(function(r) { return r.json(); }),
+  ]).then(function(results) {
+    var statusData = results[0];
+    var logData    = results[1];
+    var eventsData = results[2];
+
+    var dotCls   = statusData.connected ? 'conn-dot ok' : 'conn-dot err';
+    var connText = statusData.connected
+      ? ('\u2705 \uC5F0\uACB0\uB428' + (statusData.bot_username ? ' (@' + esc(statusData.bot_username) + ')' : ''))
+      : ('\u274C \uC5F0\uACB0 \uC2E4\uD328' + (statusData.error ? ': ' + esc(statusData.error) : ''));
+    var connHtml = '<div class="conn-status"><span class="' + dotCls + '"></span>' + connText + '</div>';
+
+    var logText = logData.logs || logData.error || '(\uB85C\uADF8 \uC5C6\uC74C)';
+
+    var errEvents = (eventsData.events || []).filter(function(e) {
+      return e.bot_id === botId && (e.action === 'error' || e.action === 'failed');
+    }).slice(-10).reverse();
+    var errHtml = errEvents.length
+      ? errEvents.map(function(e) {
+          return '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border2)">' +
+                 '<span style="color:var(--text3);font-family:monospace">' + esc(timeStr(e.time)) + '</span> ' +
+                 esc(e.detail || '') + '</div>';
+        }).join('')
+      : '<div style="color:var(--text3);font-size:12px">\uCD5C\uADFC \uC624\uB958 \uC5C6\uC74C</div>';
+
+    grid.innerHTML =
+      '<div class="ts-card">' +
+        '<div class="ts-card-header">\uC5F0\uACB0 \uC0C1\uD0DC</div>' +
+        '<div class="ts-card-body">' + connHtml + '</div>' +
+      '</div>' +
+      '<div class="ts-card">' +
+        '<div class="ts-card-header">\uCD5C\uADFC \uC624\uB958 \uC774\uBCA4\uD2B8</div>' +
+        '<div class="ts-card-body">' + errHtml + '</div>' +
+      '</div>' +
+      '<div class="ts-card" style="grid-column:1/-1">' +
+        '<div class="ts-card-header">\uCD5C\uADFC \uB85C\uADF8 (50\uC904)</div>' +
+        '<div class="ts-card-body"><pre class="log-pre">' + esc(logText) + '</pre></div>' +
+      '</div>';
+  }).catch(function(err) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">\uB85C\uB529 \uC2E4\uD328: ' + esc(String(err)) + '</div>';
+  });
+};
+
+window.toggleTsAuto = function() {};
+
+// Health badge
+function updateHealth(status) {
+  var badge = document.getElementById('health-badge');
+  var text  = document.getElementById('health-text');
+  var map   = {
+    healthy:  ['healthy',  '\uC815\uC0C1'],
+    degraded: ['degraded', '\uC77C\uBD80 \uC624\uB958'],
+    down:     ['down',     '\uB2E4\uC6B4']
+  };
+  var info = map[status] || map['healthy'];
+  badge.className = 'health-badge ' + info[0];
+  text.textContent = info[1];
+}
+
+// Modal
+function closeModal() {
+  document.getElementById('logModal').classList.remove('open');
+}
+window.closeModal = closeModal;
+document.getElementById('logModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// Actions
+window.restartBot = function(id) {
+  if (!confirm(id + ' \uBD07\uC744 \uC7AC\uC2DC\uC791\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  fetch('/api/bots/' + encodeURIComponent(id) + '/restart', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      alert(data.status || data.error || '\uC694\uCCAD \uC644\uB8CC');
+      loadBots();
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.showLogs = function(id) {
+  document.getElementById('logTitle').textContent = id + ' \uB85C\uADF8';
+  document.getElementById('logContent').textContent = '\uB85C\uB529 \uC911\u2026';
+  document.getElementById('logModal').classList.add('open');
+  fetch('/api/bots/' + encodeURIComponent(id) + '/logs?lines=200')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      document.getElementById('logContent').textContent = data.logs || data.error || '(\uB85C\uADF8 \uC5C6\uC74C)';
+    })
+    .catch(function(e) {
+      document.getElementById('logContent').textContent = '\uC624\uB958: ' + e;
+    });
+};
+
+window.checkStatus = function(id) {
+  fetch('/api/bots/' + encodeURIComponent(id) + '/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.connected) {
+        alert('\u2705 ' + (data.bot_username ? '@' + data.bot_username : id) + ' \uC5F0\uACB0\uB428');
+      } else {
+        alert('\u274C \uC5F0\uACB0 \uC2E4\uD328: ' + (data.error || '\uC54C \uC218 \uC5C6\uB294 \uC624\uB958'));
+      }
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.installVersion = function() {
+  var ver = document.getElementById('install-ver-input').value.trim();
+  if (!ver) { alert('\uBC84\uC804 \uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.'); return; }
+  fetch('/api/versions/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: ver }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      alert(data.status ? (ver + ' \uC124\uCE58 \uC644\uB8CC') : ('\uC2E4\uD328: ' + (data.error || '')));
+      loadVersions();
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.activateVersion = function(ver) {
+  fetch('/api/versions/activate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: ver }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var msg = ver + ' \uD65C\uC131\uD654\uB428.';
+      if (data.note) msg += '\n\u26A0\uFE0F ' + data.note;
+      alert(msg);
+      loadVersions();
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+// Fetch
+function loadBots() {
+  fetch('/api/bots')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      renderBots(data.bots || []);
+      var bots    = data.bots || [];
+      var failed  = bots.filter(function(b) { return b.state === 'failed'; }).length;
+      var running = bots.filter(function(b) { return b.state === 'running'; }).length;
+      var health  = failed > 0 ? 'degraded' : (running === 0 && bots.length > 0 ? 'down' : 'healthy');
+      updateHealth(health);
+      document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('ko-KR');
+    })
+    .catch(function() { updateHealth('down'); });
+}
+
+function loadEvents() {
+  fetch('/api/events')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { renderEvents(data.events || []); })
+    .catch(function() {});
+}
+
+function loadVersions() {
+  fetch('/api/versions')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { renderVersions(data); })
+    .catch(function() {});
+}
+
+function loadConfig() {
+  fetch('/api/config')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { renderConfig(data); })
+    .catch(function() {});
+}
+
+// Init and auto-refresh
+loadBots();
+setInterval(loadBots, 5000);
+setInterval(function() {
+  if (document.getElementById('pane-events').classList.contains('active')) loadEvents();
+}, 5000);
+setInterval(function() {
+  if (document.getElementById('pane-troubleshoot').classList.contains('active')) {
+    if (document.getElementById('ts-auto').checked) loadTroubleshoot();
+  }
+}, 5000);
 
 })();
 </script>

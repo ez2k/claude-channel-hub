@@ -9,11 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/your-org/claude-harness/internal/admin"
-	"github.com/your-org/claude-harness/internal/bot"
-	"github.com/your-org/claude-harness/internal/config"
-	"github.com/your-org/claude-harness/internal/supervisor"
-	"github.com/your-org/claude-harness/internal/version"
+	"github.com/ez2k/claude-channel-hub/internal/admin"
+	"github.com/ez2k/claude-channel-hub/internal/bot"
+	"github.com/ez2k/claude-channel-hub/internal/config"
+	"github.com/ez2k/claude-channel-hub/internal/supervisor"
+	"github.com/ez2k/claude-channel-hub/internal/version"
 )
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	fmt.Println("╔══════════════════════════════════════════╗")
-	fmt.Println("║   🤖 Claude Harness v4.0                 ║")
+	fmt.Println("║   🤖 Claude Channel Hub v4.0             ║")
 	fmt.Println("║   Bot/Channel Orchestrator               ║")
 	fmt.Println("╚══════════════════════════════════════════╝")
 
@@ -76,7 +76,7 @@ func main() {
 
 	go sv.Start(ctx)
 
-	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil)
+	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil, versionMgr, cfg)
 	if err := adminSrv.Start(ctx); err != nil {
 		log.Printf("Admin stopped: %v", err)
 	}

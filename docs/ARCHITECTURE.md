@@ -1,4 +1,4 @@
-# 아키텍처 — Claude Harness v4
+# 아키텍처 — Claude Channel Hub
 
 ## 개요
 
@@ -183,7 +183,7 @@ Exit
 ## Claude Code 버전 관리
 
 ```
-$HOME/.claude-harness/
+$HOME/.claude-channel-hub/
   versions/
     2.1.104/
       node_modules/@anthropic-ai/claude-code/
@@ -233,7 +233,7 @@ supervisor:
 
 claude:
   default_version: "latest"
-  versions_dir: "${HOME}/.claude-harness/versions"
+  versions_dir: "${HOME}/.claude-channel-hub/versions"
   auto_update: true
   auto_update_interval: 24h
 
@@ -474,7 +474,7 @@ HARNESS_CHANNELS_CONFIG='[
   access.json                        인증/페어링
   bot.pid                            프로세스 ID
 
-~/.claude-harness/
+~/.claude-channel-hub/
   versions/                          Claude Code 버전들
     2.1.104/
     2.2.0/

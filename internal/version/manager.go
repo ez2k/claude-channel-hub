@@ -18,12 +18,12 @@ type Manager struct {
 }
 
 // NewManager creates a version manager.
-// versionsDir is where versions are installed (e.g., ~/.claude-harness/versions/).
+// versionsDir is where versions are installed (e.g., ~/.claude-channel-hub/versions/).
 // defaultVersion is the fallback version ("latest" or a specific version like "2.1.104").
 func NewManager(versionsDir, defaultVersion string) *Manager {
 	if versionsDir == "" {
 		home, _ := os.UserHomeDir()
-		versionsDir = filepath.Join(home, ".claude-harness", "versions")
+		versionsDir = filepath.Join(home, ".claude-channel-hub", "versions")
 	}
 	if defaultVersion == "" {
 		defaultVersion = "latest"

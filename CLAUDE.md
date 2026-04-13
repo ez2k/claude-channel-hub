@@ -1,4 +1,4 @@
-# Claude Harness — Project Context
+# Claude Channel Hub — Project Context
 
 ## 프로젝트 개요
 Claude API 기반 셀프-임프루빙 멀티채널 에이전트 하네스. Go로 작성.
@@ -54,8 +54,8 @@ skills/                          # 스킬 디렉토리
 
 ## 빌드 & 실행
 ```bash
-go build -o bin/claude-harness ./cmd/bot/
-./bin/claude-harness -config configs/channels.yaml -data ./data
+go build -o bin/claude-channel-hub ./cmd/bot/
+./bin/claude-channel-hub -config configs/channels.yaml -data ./data
 ```
 
 ## 테스트
