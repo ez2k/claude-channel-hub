@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -105,9 +106,19 @@ func (p *Process) Start(ctx context.Context) error {
 		}
 		env = append(env, e)
 	}
+	// Per-bot state directory for independent access control
+	home, _ := os.UserHomeDir()
 	switch p.bot.Config.Type {
 	case "telegram":
 		env = append(env, fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s", p.bot.Config.Token))
+		stateDir := filepath.Join(home, ".claude", "channels", "telegram-"+p.bot.Config.ID)
+		os.MkdirAll(stateDir, 0700)
+		env = append(env, fmt.Sprintf("TELEGRAM_STATE_DIR=%s", stateDir))
+		// Copy token .env if not exists
+		envFile := filepath.Join(stateDir, ".env")
+		if _, err := os.Stat(envFile); os.IsNotExist(err) {
+			os.WriteFile(envFile, []byte(fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s\n", p.bot.Config.Token)), 0600)
+		}
 	case "discord":
 		env = append(env, fmt.Sprintf("DISCORD_BOT_TOKEN=%s", p.bot.Config.Token))
 	}

@@ -394,15 +394,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // --- Per-Bot Access Control API ---
 
 // accessPathForBot returns the access.json path for a given bot type.
-func accessPathForBot(botType string) string {
-	switch botType {
-	case "telegram":
-		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", "telegram", "access.json")
-	case "discord":
-		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", "discord", "access.json")
-	default:
-		return filepath.Join(os.Getenv("HOME"), ".claude", "channels", botType, "access.json")
-	}
+func accessPathForBot(botType, botID string) string {
+	return filepath.Join(os.Getenv("HOME"), ".claude", "channels", botType+"-"+botID, "access.json")
 }
 
 func (s *Server) findBotConfig(botID string) *config.BotConfig {
@@ -423,7 +416,7 @@ func (s *Server) handleBotAccess(w http.ResponseWriter, r *http.Request, botID s
 		http.Error(w, "bot not found", 404)
 		return
 	}
-	accessPath := accessPathForBot(botCfg.Type)
+	accessPath := accessPathForBot(botCfg.Type, botID)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -581,7 +574,7 @@ func (s *Server) handleBotAccessDetect(w http.ResponseWriter, r *http.Request, b
 	json.Unmarshal(body, &tgResp)
 
 	// Load current access
-	accessPath := accessPathForBot(botCfg.Type)
+	accessPath := accessPathForBot(botCfg.Type, botID)
 	accessData, _ := os.ReadFile(accessPath)
 	var access map[string]interface{}
 	json.Unmarshal(accessData, &access)
