@@ -1497,7 +1497,7 @@ function renderBots(bots) {
           (b.needs_restart ? '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')" style="font-size:10px;padding:1px 8px;background:#f0883e;border-color:#f0883e">&#xC5C5;&#xB370;&#xC774;&#xD2B8; &#xC7AC;&#xC2DC;&#xC791;</button>' : '') +
         '</div>' +
         '<div class="bot-footer">' +
-          '<span class="bot-type">' + esc(b.type || 'unknown') + '</span>' +
+          '<span class="bot-type">' + esc(b.type || 'unknown') + (b.bot_username ? ' @' + esc(b.bot_username) : '') + '</span>' +
           '<div class="bot-actions">' +
             '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
             '<button class="btn btn-logs"    onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</button>' +

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -149,7 +150,8 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 			s.logEvent(entry.bot.Config.ID, "error", err.Error())
 		} else {
 			entry.bot.RunningVersion = s.versionMgr.SystemVersion()
-			log.Printf("✅ [%s] Bot process started (pid %d, claude %s)", entry.bot.Config.ID, entry.bot.Process.PID(), entry.bot.RunningVersion)
+			entry.bot.Username = fetchBotUsername(entry.bot.Config.Type, entry.bot.Config.Token)
+			log.Printf("✅ [%s] Bot process started (pid %d, claude %s, @%s)", entry.bot.Config.ID, entry.bot.Process.PID(), entry.bot.RunningVersion, entry.bot.Username)
 			entry.bot.Process.Wait()
 		}
 
@@ -232,6 +234,7 @@ func (s *Supervisor) Status() []BotStatus {
 			st.State = "idle"
 		}
 		st.NeedsRestart = st.ClaudeVersion != "" && st.SystemVersion != "" && st.ClaudeVersion != st.SystemVersion
+		st.BotUsername = e.bot.Username
 		result = append(result, st)
 	}
 	return result
@@ -250,6 +253,33 @@ type BotStatus struct {
 	ClaudeVersion string `json:"claude_version"`
 	SystemVersion string `json:"system_version"`
 	NeedsRestart  bool   `json:"needs_restart"`
+	BotUsername   string `json:"bot_username,omitempty"`
+}
+
+// fetchBotUsername calls the platform API to get the bot's username.
+func fetchBotUsername(botType, token string) string {
+	if token == "" {
+		return ""
+	}
+	switch botType {
+	case "telegram":
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get("https://api.telegram.org/bot" + token + "/getMe")
+		if err != nil {
+			return ""
+		}
+		defer resp.Body.Close()
+		var result struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				Username string `json:"username"`
+			} `json:"result"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result.Result.Username
+	default:
+		return ""
+	}
 }
 
 // countAccessGroups reads the bot's access.json and returns the number of registered groups.

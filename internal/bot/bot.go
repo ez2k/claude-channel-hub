@@ -6,6 +6,7 @@ type Bot struct {
 	Channels       []ChannelConfig // channels assigned to this bot
 	Process        *Process        // managed claude process (nil if not running)
 	RunningVersion string          // claude version captured at process start
+	Username       string          // platform bot username (e.g., @my_bot)
 }
 
 // BotConfig matches config.BotConfig but is self-contained
