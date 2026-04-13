@@ -1,44 +1,52 @@
 admin:
-  addr: "${ADMIN_ADDR}"
-
+    addr: :8082
 supervisor:
-  health_check_interval: 30s
-  max_restarts: 10
-  restart_delay: 2s
-  restart_backoff_max: 5m
-
+    health_check_interval: 30s
+    max_restarts: 10
+    restart_delay: 2s
+    restart_backoff_max: 5m0s
 claude:
-  default_version: "latest"
-  versions_dir: "${HOME}/.claude-channel-hub/versions"
-  auto_update: false
-
+    default_version: latest
+    versions_dir: /root/.claude-channel-hub/versions
+    auto_update: false
+    auto_update_interval: 0s
 defaults:
-  model: ""
-  system_prompt: ""
-  permission_mode: "dangerously-skip"
-  plugins_dir: ./plugins
-
+    model: ""
+    system_prompt: ""
+    permission_mode: dangerously-skip
+    plugins_dir: ./plugins
 bots:
-  - id: main-bot
-    type: telegram
-    name: "메인 봇"
-    enabled: true
-    token: "${TELEGRAM_BOT_TOKEN}"
-    plugin: "telegram"
-    plugin_marketplace: "claude-plugins-official"
-
-  # - id: discord-bot
-  #   type: discord
-  #   name: "디스코드 봇"
-  #   enabled: false
-  #   token: "${DISCORD_BOT_TOKEN}"
-  #   plugin: "discord"
-  #   plugin_marketplace: "claude-plugins-official"
-
+    - id: main-bot
+      type: telegram
+      name: 메인 봇
+      enabled: true
+      token: 8660591240:AAHbICzUlum_QkYtzYbr3ti_lzdbcBsGSiw
+      plugin: telegram
+      plugin_dir: ./plugins/telegram
+      plugin_marketplace: claude-plugins-official
+      claude_version: ""
+      model: ""
+      system_prompt: ""
+    - id: ezix_claude_bot
+      type: telegram
+      name: ezix_claude_bot
+      enabled: true
+      token: 8578383619:AAGSYUbFiPj5TGwVOwa1rpOvFyXO1scBZTU
+      plugin: telegram
+      plugin_dir: ""
+      plugin_marketplace: claude-plugins-official
+      claude_version: ""
+      model: ""
+      system_prompt: ""
 channels:
-  - id: general
-    bot: main-bot
-    name: "일반 대화"
-    match:
-      type: default
-    data_dir: "./data/general"
+    - id: general
+      bot: main-bot
+      name: 일반 대화
+      match:
+        type: default
+        chat_ids: []
+        user_ids: []
+        topic_ids: []
+      model: ""
+      system_prompt: ""
+      data_dir: ./data/general

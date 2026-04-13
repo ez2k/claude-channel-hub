@@ -1731,12 +1731,14 @@ window.activateVersion = function(ver) {
 };
 
 // Fetch
+var cachedBots = [];
 function loadBots() {
   fetch('/api/bots')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      renderBots(data.bots || []);
-      var bots    = data.bots || [];
+      cachedBots = data.bots || [];
+      renderBots(cachedBots);
+      var bots    = cachedBots;
       var failed  = bots.filter(function(b) { return b.state === 'failed'; }).length;
       var running = bots.filter(function(b) { return b.state === 'running'; }).length;
       var health  = failed > 0 ? 'degraded' : (running === 0 && bots.length > 0 ? 'down' : 'healthy');
@@ -1773,7 +1775,12 @@ var currentAccessBot = '';
 
 window.showAccessModal = function(botId) {
   currentAccessBot = botId;
-  document.getElementById('accessModalTitle').textContent = botId + ' \uC811\uADFC \uAD00\uB9AC';
+  var typeLabel = '';
+  var sameCnt = 0;
+  (cachedBots||[]).forEach(function(b){ if (b.id===botId) typeLabel=b.type; });
+  (cachedBots||[]).forEach(function(b){ if (b.type===typeLabel) sameCnt++; });
+  var shared = sameCnt > 1 ? ' ('+typeLabel+' 봇 공유 설정)' : '';
+  document.getElementById('accessModalTitle').textContent = botId + ' 접근 관리' + shared;
   document.getElementById('modal-detect-results').innerHTML = '';
   var modal = document.getElementById('accessModal');
   modal.style.display = 'flex';
