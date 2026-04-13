@@ -2,9 +2,11 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -207,13 +209,15 @@ func (s *Supervisor) Status() []BotStatus {
 	defer s.mu.RUnlock()
 	var result []BotStatus
 	for _, e := range s.entries {
+		// Count channels + access groups
+		groupCount := countAccessGroups(e.bot.Config.Type, e.bot.Config.ID)
 		st := BotStatus{
 			ID:           e.bot.Config.ID,
 			Name:         e.bot.Config.Name,
 			Type:         e.bot.Config.Type,
 			Enabled:      e.bot.Config.Enabled,
 			RestartCount: e.restartCount,
-			ChannelCount: len(e.bot.Channels),
+			ChannelCount: len(e.bot.Channels) + groupCount,
 		}
 		if e.bot.Process != nil {
 			st.State = string(e.bot.Process.State())
@@ -236,6 +240,23 @@ type BotStatus struct {
 	Uptime       string `json:"uptime"`
 	RestartCount int    `json:"restart_count"`
 	ChannelCount int    `json:"channel_count"`
+}
+
+// countAccessGroups reads the bot's access.json and returns the number of registered groups.
+func countAccessGroups(botType, botID string) int {
+	home, _ := os.UserHomeDir()
+	accessPath := filepath.Join(home, ".claude", "channels", botType+"-"+botID, "access.json")
+	data, err := os.ReadFile(accessPath)
+	if err != nil {
+		return 0
+	}
+	var access struct {
+		Groups map[string]interface{} `json:"groups"`
+	}
+	if err := json.Unmarshal(data, &access); err != nil {
+		return 0
+	}
+	return len(access.Groups)
 }
 
 // ChannelInfo is a snapshot of a channel's configuration.
