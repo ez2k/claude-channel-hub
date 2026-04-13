@@ -508,7 +508,40 @@ func (s *Server) handleBotAccess(w http.ResponseWriter, r *http.Request, botID s
 			}
 			access["allowFrom"] = filtered
 		case "set_dm_policy":
-			access["dmPolicy"] = req.ID // reuse ID field for policy value
+			access["dmPolicy"] = req.ID
+		case "approve_pending":
+			// Move pending sender to allowFrom, write approved file for plugin
+			pending, _ := access["pending"].(map[string]interface{})
+			if pending != nil {
+				for code, entry := range pending {
+					if code == req.ID {
+						if em, ok := entry.(map[string]interface{}); ok {
+							senderID := fmt.Sprint(em["senderId"])
+							// Add to allowFrom
+							found := false
+							for _, u := range allowFrom {
+								if fmt.Sprint(u) == senderID { found = true; break }
+							}
+							if !found {
+								access["allowFrom"] = append(allowFrom, senderID)
+							}
+							// Write approved file for plugin to pick up
+							approvedDir := filepath.Join(filepath.Dir(accessPath), "approved")
+							os.MkdirAll(approvedDir, 0700)
+							os.WriteFile(filepath.Join(approvedDir, code), []byte(senderID), 0644)
+						}
+						delete(pending, code)
+						break
+					}
+				}
+				access["pending"] = pending
+			}
+		case "deny_pending":
+			pending, _ := access["pending"].(map[string]interface{})
+			if pending != nil {
+				delete(pending, req.ID)
+				access["pending"] = pending
+			}
 		default:
 			http.Error(w, "unknown action: "+req.Action, 400)
 			return
@@ -535,11 +568,13 @@ func (s *Server) handleBotAccessDetect(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
-	// Stop the bot so we can call getUpdates
-	s.sv.RestartBot(botID)
-	time.Sleep(2 * time.Second)
+	// Stop the bot process (without auto-restart) so we can call getUpdates
+	s.sv.StopBot(botID)
+	time.Sleep(3 * time.Second) // wait for process to fully release polling
 
-	resp, err := s.httpClient.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?limit=100&timeout=2", botCfg.Token))
+	// Poll with 10s long-polling timeout — gives user time to send a message
+	detectClient := &http.Client{Timeout: 15 * time.Second}
+	resp, err := detectClient.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?limit=100&timeout=10", botCfg.Token))
 	if err != nil {
 		writeJSON(w, map[string]interface{}{"error": "getUpdates failed: " + err.Error()})
 		return
@@ -630,11 +665,14 @@ func (s *Server) handleBotAccessDetect(w http.ResponseWriter, r *http.Request, b
 		}
 	}
 
+	// Restart the bot after detection
+	s.sv.RestartBot(botID)
+
 	writeJSON(w, map[string]interface{}{
 		"bot":    botID,
 		"groups": detectedGroups,
 		"users":  detectedUsers,
-		"note":   "봇이 자동 재시작됩니다",
+		"note":   "감지 완료, 봇 재시작됨",
 	})
 }
 
@@ -1327,6 +1365,12 @@ body {
       <button onclick="detectGroups()" style="padding:6px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
     </div>
 
+    <div id="modal-pending" style="display:none;margin-bottom:16px">
+      <div style="background:#0d1117;border:1px solid #f0883e;border-radius:8px;padding:12px">
+        <h4 style="margin:0 0 8px;font-size:13px;color:#f0883e">&#xB300;&#xAE30; &#xC911;&#xC778; &#xD398;&#xC5B4;&#xB9C1; &#xC694;&#xCCAD;</h4>
+        <div id="modal-pending-list"></div>
+      </div>
+    </div>
     <div id="modal-detect-results"></div>
   </div>
 </div>
@@ -1778,10 +1822,17 @@ window.showAccessModal = function(botId) {
   var modal = document.getElementById('accessModal');
   modal.style.display = 'flex';
   loadAccess();
+  // Auto-refresh pending while modal is open
+  if (window._accessInterval) clearInterval(window._accessInterval);
+  window._accessInterval = setInterval(function() {
+    if (modal.style.display === 'flex') loadAccess();
+    else clearInterval(window._accessInterval);
+  }, 5000);
 };
 
 window.closeAccessModal = function() {
   document.getElementById('accessModal').style.display = 'none';
+  if (window._accessInterval) clearInterval(window._accessInterval);
 };
 
 document.getElementById('accessModal').addEventListener('click', function(e) {
@@ -1828,7 +1879,51 @@ function loadAccess() {
           + '</div>';
       }).join('');
     }
+    // Pending pairings
+    var pending = data.pending || {};
+    var pendingEl = document.getElementById('modal-pending');
+    var pendingListEl = document.getElementById('modal-pending-list');
+    var codes = Object.keys(pending);
+    // Filter expired
+    var now = Date.now();
+    codes = codes.filter(function(c) { return (pending[c].expiresAt || 0) > now; });
+    if (codes.length > 0) {
+      pendingEl.style.display = 'block';
+      pendingListEl.innerHTML = codes.map(function(code) {
+        var p = pending[code];
+        var sender = p.senderId || '?';
+        var chatId = p.chatId || '';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+          + '<span><span style="font-family:monospace;font-size:12px">코드: ' + esc(code) + '</span> — 발신자: <span style="font-weight:bold">' + esc(sender) + '</span>'
+          + (chatId ? ' (chat: ' + esc(chatId) + ')' : '') + '</span>'
+          + '<span style="display:flex;gap:4px">'
+          + '<button onclick="approvePending(\'' + esc(code) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">승인</button>'
+          + '<button onclick="denyPending(\'' + esc(code) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">거부</button>'
+          + '</span></div>';
+      }).join('');
+    } else {
+      pendingEl.style.display = 'none';
+    }
   }).catch(function(){});
+}
+
+function approvePending(code) {
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'approve_pending', id:code})
+  }).then(function(r){return r.json()}).then(function(data) {
+    if (data.status === 'updated') alert('승인 완료');
+    else alert('오류: ' + JSON.stringify(data));
+    loadAccess();
+  }).catch(function(e){ alert('요청 실패: ' + e); });
+}
+
+function denyPending(code) {
+  if (!confirm('이 요청을 거부하시겠습니까?')) return;
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'deny_pending', id:code})
+  }).then(function(r){return r.json()}).then(function() {
+    loadAccess();
+  }).catch(function(e){ alert('요청 실패: ' + e); });
 }
 
 function addUser() {

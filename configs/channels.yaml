@@ -27,9 +27,9 @@ bots:
       claude_version: ""
       model: ""
       system_prompt: ""
-    - id: ezix_claude_bot
+    - id: claude_bot
       type: telegram
-      name: ezix_claude_bot
+      name: ""
       enabled: true
       token: 8578383619:AAGSYUbFiPj5TGwVOwa1rpOvFyXO1scBZTU
       plugin: telegram

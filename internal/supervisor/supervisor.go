@@ -37,7 +37,8 @@ type botEntry struct {
 	bot          *bot.Bot
 	restartCount int
 	lastRestart  time.Time
-	restartCh    chan struct{} // manual restart signal
+	restartCh    chan struct{}      // manual restart signal
+	cancel       context.CancelFunc // cancels this bot's runBot goroutine
 }
 
 // Supervisor manages bot processes with health monitoring and auto-restart.
@@ -90,7 +91,9 @@ func (s *Supervisor) Start(ctx context.Context) {
 	for _, e := range s.entries {
 		if e.bot.Config.Enabled {
 			count++
-			go s.runBot(childCtx, e)
+			botCtx, botCancel := context.WithCancel(childCtx)
+			e.cancel = botCancel
+			go s.runBot(botCtx, e)
 		}
 	}
 	s.mu.RUnlock()
@@ -334,7 +337,9 @@ func (s *Supervisor) RegisterAndStart(b *bot.Bot) {
 	s.mu.Unlock()
 	s.logEvent(b.Config.ID, "registered", "added via API")
 	if b.Config.Enabled && s.ctx != nil {
-		go s.runBot(s.ctx, entry)
+		botCtx, botCancel := context.WithCancel(s.ctx)
+		entry.cancel = botCancel
+		go s.runBot(botCtx, entry)
 	}
 }
 
@@ -344,6 +349,10 @@ func (s *Supervisor) RemoveBot(botID string) error {
 	defer s.mu.Unlock()
 	for i, e := range s.entries {
 		if e.bot.Config.ID == botID {
+			// Cancel the runBot goroutine first
+			if e.cancel != nil {
+				e.cancel()
+			}
 			if e.bot.Process != nil {
 				e.bot.Process.Stop()
 			}
@@ -371,6 +380,25 @@ func (s *Supervisor) RestartBot(botID string) error {
 			default:
 			}
 			s.logEvent(botID, "restart_requested", "manual restart via API")
+			return nil
+		}
+	}
+	return fmt.Errorf("bot %s not found", botID)
+}
+
+// StopBot stops a bot process and its runBot goroutine.
+func (s *Supervisor) StopBot(botID string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.entries {
+		if e.bot.Config.ID == botID {
+			if e.cancel != nil {
+				e.cancel()
+			}
+			if e.bot.Process != nil {
+				e.bot.Process.Stop()
+			}
+			s.logEvent(botID, "stopped", "stopped via API")
 			return nil
 		}
 	}
