@@ -1,0 +1,15 @@
+{
+  "name": "telegram-enhanced",
+  "version": "0.0.1",
+  "description": "Enhanced Telegram channel with memory, profile, and skill features",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": "./server.ts",
+  "scripts": {
+    "start": "bun install --no-summary && bun server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "grammy": "^1.21.0"
+  }
+}

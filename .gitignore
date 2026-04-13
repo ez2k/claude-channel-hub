@@ -1,0 +1,10 @@
+bin/
+bot
+data/
+.env
+*.exe
+.DS_Store
+.omc/
+node_modules/
+/tmp/
+*.log

@@ -1,0 +1,11 @@
+{
+  "name": "telegram-enhanced",
+  "description": "Enhanced Telegram channel with memory, profile, skill features and multi-channel routing.",
+  "version": "1.0.0",
+  "keywords": [
+    "telegram",
+    "messaging",
+    "channel",
+    "mcp"
+  ]
+}

@@ -1,0 +1,44 @@
+admin:
+  addr: "${ADMIN_ADDR}"
+
+supervisor:
+  health_check_interval: 30s
+  max_restarts: 10
+  restart_delay: 2s
+  restart_backoff_max: 5m
+
+claude:
+  default_version: "latest"
+  versions_dir: "${HOME}/.claude-harness/versions"
+  auto_update: false
+
+defaults:
+  model: ""
+  system_prompt: ""
+  permission_mode: "dangerously-skip"
+  plugins_dir: ./plugins
+
+bots:
+  - id: main-bot
+    type: telegram
+    name: "메인 봇"
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    plugin: "telegram"
+    plugin_marketplace: "claude-plugins-official"
+
+  # - id: discord-bot
+  #   type: discord
+  #   name: "디스코드 봇"
+  #   enabled: false
+  #   token: "${DISCORD_BOT_TOKEN}"
+  #   plugin: "discord"
+  #   plugin_marketplace: "claude-plugins-official"
+
+channels:
+  - id: general
+    bot: main-bot
+    name: "일반 대화"
+    match:
+      type: default
+    data_dir: "./data/general"
