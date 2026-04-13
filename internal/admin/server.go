@@ -1839,7 +1839,7 @@ document.getElementById('accessModal').addEventListener('click', function(e) {
   if (e.target === this) closeAccessModal();
 });
 
-function loadAccess() {
+window.loadAccess = function() {
   if (!currentAccessBot) return;
   fetch('/api/bots/' + currentAccessBot + '/access').then(function(r){return r.json()}).then(function(data) {
     currentAccess = data;
@@ -1907,7 +1907,7 @@ function loadAccess() {
   }).catch(function(){});
 }
 
-function approvePending(code) {
+window.approvePending = function(code) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'approve_pending', id:code})
   }).then(function(r){return r.json()}).then(function(data) {
@@ -1917,7 +1917,7 @@ function approvePending(code) {
   }).catch(function(e){ alert('요청 실패: ' + e); });
 }
 
-function denyPending(code) {
+window.denyPending = function(code) {
   if (!confirm('이 요청을 거부하시겠습니까?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'deny_pending', id:code})
@@ -1926,7 +1926,7 @@ function denyPending(code) {
   }).catch(function(e){ alert('요청 실패: ' + e); });
 }
 
-function addUser() {
+window.addUser = function() {
   var uid = document.getElementById('modal-new-user-id').value.trim();
   if (!uid) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1937,14 +1937,14 @@ function addUser() {
   });
 }
 
-function removeUser(uid) {
+window.removeUser = function(uid) {
   if (!confirm(uid + ' \uC0AC\uC6A9\uC790\uB97C \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_user', id:uid})
   }).then(function(){loadAccess()});
 }
 
-function addGroup() {
+window.addGroup = function() {
   var gid = document.getElementById('modal-new-group-id').value.trim();
   if (!gid) return;
   var mention = document.getElementById('modal-new-group-mention').checked;
@@ -1957,14 +1957,14 @@ function addGroup() {
   });
 }
 
-function removeGroup(gid) {
+window.removeGroup = function(gid) {
   if (!confirm(gid + ' \uADF8\uB8F9\uC744 \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_group', id:gid})
   }).then(function(){loadAccess()});
 }
 
-function updateDmPolicy() {
+window.updateDmPolicy = function() {
   var policy = document.getElementById('modal-dm-policy').value;
   if (!currentAccessBot) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1976,7 +1976,7 @@ function updateDmPolicy() {
   });
 }
 
-function detectGroups() {
+window.detectGroups = function() {
   if (!currentAccessBot) return;
   var btn = event.target;
   btn.disabled = true;
@@ -2029,13 +2029,13 @@ function detectGroups() {
     });
 }
 
-function addDetectedGroup(gid) {
+window.addDetectedGroup = function(gid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_group', id:gid, require_mention:false})
   }).then(function(){loadAccess();});
 }
 
-function addDetectedUser(uid) {
+window.addDetectedUser = function(uid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_user', id:uid})
   }).then(function(){loadAccess();});
