@@ -74,7 +74,7 @@ func main() {
 		cancel()
 	}()
 
-	sv.Start(ctx)
+	go sv.Start(ctx)
 
 	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil)
 	if err := adminSrv.Start(ctx); err != nil {
