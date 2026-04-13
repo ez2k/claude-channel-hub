@@ -76,7 +76,7 @@ func main() {
 
 	go sv.Start(ctx)
 
-	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil, versionMgr, cfg)
+	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil, versionMgr, cfg, *configPath)
 	if err := adminSrv.Start(ctx); err != nil {
 		log.Printf("Admin stopped: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ez2k/claude-channel-hub/internal/bot"
 	"github.com/ez2k/claude-channel-hub/internal/config"
 	"github.com/ez2k/claude-channel-hub/internal/store"
 	"github.com/ez2k/claude-channel-hub/internal/supervisor"
@@ -24,16 +25,18 @@ type Server struct {
 	store      store.Store
 	versionMgr *version.Manager
 	cfg        *config.Root
+	configPath string
 	addr       string
 	httpClient *http.Client
 }
 
-func NewServer(addr string, sv *supervisor.Supervisor, st store.Store, vm *version.Manager, cfg *config.Root) *Server {
+func NewServer(addr string, sv *supervisor.Supervisor, st store.Store, vm *version.Manager, cfg *config.Root, configPath string) *Server {
 	return &Server{
 		sv:         sv,
 		store:      st,
 		versionMgr: vm,
 		cfg:        cfg,
+		configPath: configPath,
 		addr:       addr,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
@@ -84,6 +87,54 @@ func (s *Server) Start(ctx context.Context) error {
 // --- Bot API ---
 
 func (s *Server) handleBots(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		body, _ := io.ReadAll(r.Body)
+		var req config.BotConfig
+		json.Unmarshal(body, &req)
+		if req.ID == "" || req.Token == "" {
+			http.Error(w, "id and token required", 400)
+			return
+		}
+		if req.Type == "" {
+			req.Type = "telegram"
+		}
+		if req.Plugin == "" {
+			req.Plugin = req.Type
+		}
+		if req.PluginMarketplace == "" {
+			req.PluginMarketplace = "claude-plugins-official"
+		}
+		req.Enabled = true
+
+		// Check duplicate
+		if s.cfg != nil {
+			for _, b := range s.cfg.Bots {
+				if b.ID == req.ID {
+					http.Error(w, "bot ID already exists", 409)
+					return
+				}
+			}
+			s.cfg.Bots = append(s.cfg.Bots, req)
+			config.Save(s.configPath, s.cfg)
+		}
+
+		// Create and start bot
+		b := &bot.Bot{Config: bot.BotConfig{
+			ID:                req.ID,
+			Type:              req.Type,
+			Name:              req.Name,
+			Enabled:           req.Enabled,
+			Token:             req.Token,
+			Plugin:            req.Plugin,
+			PluginMarketplace: req.PluginMarketplace,
+			Model:             req.Model,
+			SystemPrompt:      req.SystemPrompt,
+		}}
+		s.sv.RegisterAndStart(b)
+		writeJSON(w, map[string]string{"status": "created", "bot": req.ID})
+		return
+	}
+
 	bots := s.sv.Status()
 	writeJSON(w, map[string]interface{}{"bots": bots})
 }
@@ -190,6 +241,41 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		writeJSON(w, result)
+		return
+	}
+
+	// DELETE /api/bots/:id
+	if r.Method == http.MethodDelete && len(parts) == 1 {
+		s.sv.RemoveBot(botID)
+		if s.cfg != nil {
+			for i, b := range s.cfg.Bots {
+				if b.ID == botID {
+					s.cfg.Bots = append(s.cfg.Bots[:i], s.cfg.Bots[i+1:]...)
+					break
+				}
+			}
+			config.Save(s.configPath, s.cfg)
+		}
+		writeJSON(w, map[string]string{"status": "deleted", "bot": botID})
+		return
+	}
+
+	// POST /api/bots/:id/toggle
+	if r.Method == http.MethodPost && len(parts) == 2 && parts[1] == "toggle" {
+		if s.cfg != nil {
+			for i := range s.cfg.Bots {
+				if s.cfg.Bots[i].ID == botID {
+					s.cfg.Bots[i].Enabled = !s.cfg.Bots[i].Enabled
+					config.Save(s.configPath, s.cfg)
+					if s.cfg.Bots[i].Enabled {
+						s.sv.RestartBot(botID)
+					}
+					writeJSON(w, map[string]interface{}{"status": "toggled", "enabled": s.cfg.Bots[i].Enabled})
+					return
+				}
+			}
+		}
+		http.Error(w, "bot not found", 404)
 		return
 	}
 
@@ -1067,7 +1153,6 @@ body {
   <div class="tab active" data-tab="bots">&#xBD07; &#xBAA9;&#xB85D;</div>
   <div class="tab" data-tab="events">&#xC774;&#xBCA4;&#xD2B8; &#xB85C;&#xADF8;</div>
   <div class="tab" data-tab="versions">&#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
-  <div class="tab" data-tab="access">&#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>
   <div class="tab" data-tab="config">&#xC124;&#xC815;</div>
   <div class="tab" data-tab="troubleshoot">&#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
 </nav>
@@ -1094,7 +1179,10 @@ body {
         <div class="s-lbl">&#xC804;&#xCCB4; &#xCC44;&#xB110;</div>
       </div>
     </div>
-    <div class="section-title">&#xBD07; &#xC0C1;&#xD0DC;</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">&#xBD07; &#xC0C1;&#xD0DC;</div>
+      <button onclick="showAddBotModal()" style="padding:6px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ &#xBD07; &#xCD94;&#xAC00;</button>
+    </div>
     <div class="bot-grid" id="bot-grid">
       <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
     </div>
@@ -1136,51 +1224,6 @@ body {
     </div>
   </div>
 
-  <!-- Access tab -->
-  <div class="tab-pane" id="pane-access">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="section-title" style="margin:0">&#xBD07;&#xBCC4; &#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>
-      <div>
-        <select id="access-bot-select" onchange="loadAccessForBot()" style="padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3;margin-right:8px"></select>
-        <button onclick="detectGroups()" style="padding:6px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
-      </div>
-    </div>
-    <div id="detect-results" style="display:none;margin-bottom:16px"></div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-      <div class="card" style="padding:16px">
-        <h3 style="margin:0 0 12px;font-size:14px">&#xD5C8;&#xC6A9; &#xC0AC;&#xC6A9;&#xC790; (DM)</h3>
-        <div id="access-users"></div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <input id="new-user-id" placeholder="User ID" style="flex:1;padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
-          <button onclick="addUser()" style="padding:6px 12px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xCD94;&#xAC00;</button>
-        </div>
-      </div>
-
-      <div class="card" style="padding:16px">
-        <h3 style="margin:0 0 12px;font-size:14px">&#xD5C8;&#xC6A9; &#xADF8;&#xB8F9;</h3>
-        <div id="access-groups"></div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <input id="new-group-id" placeholder="Group Chat ID (&#xC608;: -100...)" style="flex:1;padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
-          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#8b949e;white-space:nowrap">
-            <input type="checkbox" id="new-group-mention"> &#xBA58;&#xC158; &#xD544;&#xC694;
-          </label>
-          <button onclick="addGroup()" style="padding:6px 12px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer">&#xCD94;&#xAC00;</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="padding:16px">
-      <h3 style="margin:0 0 8px;font-size:14px">DM &#xC815;&#xCC45;</h3>
-      <select id="dm-policy" onchange="updateDmPolicy()" style="padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3">
-        <option value="allowlist">allowlist (&#xD5C8;&#xC6A9; &#xBAA9;&#xB85D;&#xB9CC;)</option>
-        <option value="pairing">pairing (&#xD398;&#xC5B4;&#xB9C1; &#xCF54;&#xB4DC;)</option>
-        <option value="disabled">disabled (DM &#xCC28;&#xB2E8;)</option>
-      </select>
-      <span id="dm-policy-status" style="margin-left:8px;font-size:12px;color:#8b949e"></span>
-    </div>
-  </div>
-
   <!-- Config tab -->
   <div class="tab-pane" id="pane-config">
     <div class="section-title">&#xD604;&#xC7AC; &#xC124;&#xC815; (&#xC77D;&#xAE30; &#xC804;&#xC6A9;)</div>
@@ -1207,6 +1250,93 @@ body {
   </div>
 
 </main>
+
+<!-- Add Bot Modal -->
+<div id="addBotModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 style="margin:0;font-size:16px">&#xBD07; &#xCD94;&#xAC00;</h3>
+      <button onclick="closeAddBotModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">ID <span style="color:#f85149">*</span></label>
+        <input id="add-bot-id" placeholder="my-bot" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xD0C0;&#xC785;</label>
+        <select id="add-bot-type" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+          <option value="telegram">telegram</option>
+          <option value="discord">discord</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xC774;&#xB984;</label>
+        <input id="add-bot-name" placeholder="My Bot" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xD1A0;&#xD070; <span style="color:#f85149">*</span></label>
+        <input id="add-bot-token" placeholder="1234567890:AAF..." type="password" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xBAA8;&#xB378; (&#xC120;&#xD0DD;)</label>
+        <input id="add-bot-model" placeholder="claude-opus-4-5" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xC2DC;&#xC2A4;&#xD15C; &#xD504;&#xB86C;&#xD504;&#xD2B8; (&#xC120;&#xD0DD;)</label>
+        <textarea id="add-bot-system-prompt" rows="3" placeholder="You are a helpful assistant..." style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+      <button onclick="closeAddBotModal()" style="padding:7px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#e6edf3;cursor:pointer;font-size:13px">&#xCDE8;&#xC18C;</button>
+      <button onclick="submitAddBot()" style="padding:7px 16px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">&#xCD94;&#xAC00;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Access Modal -->
+<div id="accessModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 id="accessModalTitle" style="margin:0;font-size:16px"></h3>
+      <button onclick="closeAccessModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <h4 style="margin:0 0 8px;font-size:13px">&#xD5C8;&#xC6A9; &#xC0AC;&#xC6A9;&#xC790; (DM)</h4>
+        <div id="modal-access-users"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input id="modal-new-user-id" placeholder="User ID" style="flex:1;padding:5px 8px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
+          <button onclick="addUser()" style="padding:4px 10px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px">&#xCD94;&#xAC00;</button>
+        </div>
+      </div>
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <h4 style="margin:0 0 8px;font-size:13px">&#xD5C8;&#xC6A9; &#xADF8;&#xB8F9;</h4>
+        <div id="modal-access-groups"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input id="modal-new-group-id" placeholder="Chat ID (-100...)" style="flex:1;padding:5px 8px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#8b949e;white-space:nowrap"><input type="checkbox" id="modal-new-group-mention"> &#xBA58;&#xC158;</label>
+          <button onclick="addGroup()" style="padding:4px 10px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px">&#xCD94;&#xAC00;</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+      <span style="font-size:13px">DM &#xC815;&#xCC45;:</span>
+      <select id="modal-dm-policy" onchange="updateDmPolicy()" style="padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
+        <option value="allowlist">allowlist</option>
+        <option value="pairing">pairing</option>
+        <option value="disabled">disabled</option>
+      </select>
+      <span id="modal-dm-policy-status" style="font-size:11px;color:#8b949e"></span>
+      <div style="flex:1"></div>
+      <button onclick="detectGroups()" style="padding:6px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
+    </div>
+
+    <div id="modal-detect-results"></div>
+  </div>
+</div>
 
 <!-- Log Modal -->
 <div class="modal-overlay" id="logModal">
@@ -1239,6 +1369,7 @@ document.querySelectorAll('.tab').forEach(function(tab) {
     if (name === 'versions')     loadVersions();
     if (name === 'config')       loadConfig();
     if (name === 'troubleshoot') initTroubleshoot();
+    // 'access' tab removed — access is now per-bot modal
   });
 });
 
@@ -1330,6 +1461,8 @@ function renderBots(bots) {
             '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
             '<button class="btn btn-logs"    onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</button>' +
             '<button class="btn btn-status"  onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</button>' +
+            '<button class="btn btn-logs"    onclick="showAccessModal(\'' + bid + '\')">\uC811\uADFC \uAD00\uB9AC</button>' +
+            '<button class="btn" style="color:#f85149;border-color:rgba(248,81,73,.4)" onclick="deleteBot(\'' + bid + '\')">\uC0AD\uC81C</button>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -1603,7 +1736,6 @@ function loadBots() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       renderBots(data.bots || []);
-      initAccessBotSelect(data.bots || []);
       var bots    = data.bots || [];
       var failed  = bots.filter(function(b) { return b.state === 'failed'; }).length;
       var running = bots.filter(function(b) { return b.state === 'running'; }).length;
@@ -1635,33 +1767,34 @@ function loadConfig() {
     .catch(function() {});
 }
 
-// --- Access management (per-bot) ---
+// --- Access management modal (per-bot) ---
 var currentAccess = null;
 var currentAccessBot = '';
 
-function initAccessBotSelect(bots) {
-  var sel = document.getElementById('access-bot-select');
-  if (!sel || !bots) return;
-  sel.innerHTML = bots.map(function(b) {
-    return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + ' (' + esc(b.type) + ')</option>';
-  }).join('');
-  if (!currentAccessBot && bots.length > 0) currentAccessBot = bots[0].id;
-  sel.value = currentAccessBot;
-}
-
-function loadAccessForBot() {
-  var sel = document.getElementById('access-bot-select');
-  if (sel) currentAccessBot = sel.value;
+window.showAccessModal = function(botId) {
+  currentAccessBot = botId;
+  document.getElementById('accessModalTitle').textContent = botId + ' \uC811\uADFC \uAD00\uB9AC';
+  document.getElementById('modal-detect-results').innerHTML = '';
+  var modal = document.getElementById('accessModal');
+  modal.style.display = 'flex';
   loadAccess();
-}
+};
+
+window.closeAccessModal = function() {
+  document.getElementById('accessModal').style.display = 'none';
+};
+
+document.getElementById('accessModal').addEventListener('click', function(e) {
+  if (e.target === this) closeAccessModal();
+});
 
 function loadAccess() {
   if (!currentAccessBot) return;
   fetch('/api/bots/' + currentAccessBot + '/access').then(function(r){return r.json()}).then(function(data) {
     currentAccess = data;
-    var usersEl = document.getElementById('access-users');
-    var groupsEl = document.getElementById('access-groups');
-    var policyEl = document.getElementById('dm-policy');
+    var usersEl  = document.getElementById('modal-access-users');
+    var groupsEl = document.getElementById('modal-access-groups');
+    var policyEl = document.getElementById('modal-dm-policy');
     if (!usersEl) return;
 
     // DM policy
@@ -1670,12 +1803,12 @@ function loadAccess() {
     // Users
     var allowFrom = data.allowFrom || [];
     if (allowFrom.length === 0) {
-      usersEl.innerHTML = '<div style="color:#8b949e;font-size:13px">허용된 사용자 없음</div>';
+      usersEl.innerHTML = '<div style="color:#8b949e;font-size:12px">\uD5C8;&#xC6A9;\uB41C \uC0AC\uC6A9\uC790 \uC5C6\uC74C</div>';
     } else {
       usersEl.innerHTML = allowFrom.map(function(uid) {
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
-          + '<span style="font-family:monospace">' + esc(uid) + '</span>'
-          + '<button onclick="removeUser(\'' + esc(uid) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">삭제</button>'
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #21262d">'
+          + '<span style="font-family:monospace;font-size:12px">' + esc(uid) + '</span>'
+          + '<button onclick="removeUser(\'' + esc(uid) + '\')" style="padding:2px 6px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uC0AD\uC81C</button>'
           + '</div>';
       }).join('');
     }
@@ -1684,14 +1817,14 @@ function loadAccess() {
     var groups = data.groups || {};
     var gids = Object.keys(groups);
     if (gids.length === 0) {
-      groupsEl.innerHTML = '<div style="color:#8b949e;font-size:13px">허용된 그룹 없음</div>';
+      groupsEl.innerHTML = '<div style="color:#8b949e;font-size:12px">\uD5C8;\uC6A9;\uB41C \uADF8\uB8F9 \uC5C6\uC74C</div>';
     } else {
       groupsEl.innerHTML = gids.map(function(gid) {
         var g = groups[gid];
-        var mention = g.requireMention ? '멘션 필요' : '모든 메시지';
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
-          + '<span><span style="font-family:monospace">' + esc(gid) + '</span> <span style="color:#8b949e;font-size:11px">(' + mention + ')</span></span>'
-          + '<button onclick="removeGroup(\'' + esc(gid) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">삭제</button>'
+        var mention = g.requireMention ? '\uBA58\uC158 \uD544\uC694' : '\uBAA8\uB4E0 \uBA54\uC2DC\uC9C0';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #21262d">'
+          + '<span><span style="font-family:monospace;font-size:12px">' + esc(gid) + '</span> <span style="color:#8b949e;font-size:11px">(' + mention + ')</span></span>'
+          + '<button onclick="removeGroup(\'' + esc(gid) + '\')" style="padding:2px 6px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uC0AD\uC81C</button>'
           + '</div>';
       }).join('');
     }
@@ -1699,51 +1832,51 @@ function loadAccess() {
 }
 
 function addUser() {
-  var uid = document.getElementById('new-user-id').value.trim();
+  var uid = document.getElementById('modal-new-user-id').value.trim();
   if (!uid) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_user', id:uid})
   }).then(function(r){return r.json()}).then(function() {
-    document.getElementById('new-user-id').value = '';
+    document.getElementById('modal-new-user-id').value = '';
     loadAccess();
   });
 }
 
 function removeUser(uid) {
-  if (!confirm(uid + ' 사용자를 제거하시겠습니까?')) return;
+  if (!confirm(uid + ' \uC0AC\uC6A9\uC790\uB97C \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_user', id:uid})
   }).then(function(){loadAccess()});
 }
 
 function addGroup() {
-  var gid = document.getElementById('new-group-id').value.trim();
+  var gid = document.getElementById('modal-new-group-id').value.trim();
   if (!gid) return;
-  var mention = document.getElementById('new-group-mention').checked;
+  var mention = document.getElementById('modal-new-group-mention').checked;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_group', id:gid, require_mention:mention})
   }).then(function(r){return r.json()}).then(function() {
-    document.getElementById('new-group-id').value = '';
-    document.getElementById('new-group-mention').checked = false;
+    document.getElementById('modal-new-group-id').value = '';
+    document.getElementById('modal-new-group-mention').checked = false;
     loadAccess();
   });
 }
 
 function removeGroup(gid) {
-  if (!confirm(gid + ' 그룹을 제거하시겠습니까?')) return;
+  if (!confirm(gid + ' \uADF8\uB8F9\uC744 \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_group', id:gid})
   }).then(function(){loadAccess()});
 }
 
 function updateDmPolicy() {
-  var policy = document.getElementById('dm-policy').value;
+  var policy = document.getElementById('modal-dm-policy').value;
   if (!currentAccessBot) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'set_dm_policy', id:policy})
   }).then(function() {
-    document.getElementById('dm-policy-status').textContent = '저장됨 ✓';
-    setTimeout(function(){ document.getElementById('dm-policy-status').textContent = ''; }, 2000);
+    document.getElementById('modal-dm-policy-status').textContent = '\uC800\uC7A5\uB428 \u2713';
+    setTimeout(function(){ document.getElementById('modal-dm-policy-status').textContent = ''; }, 2000);
     loadAccess();
   });
 }
@@ -1752,29 +1885,28 @@ function detectGroups() {
   if (!currentAccessBot) return;
   var btn = event.target;
   btn.disabled = true;
-  btn.textContent = '감지 중... (봇 재시작됨)';
-  var resultsEl = document.getElementById('detect-results');
-  resultsEl.style.display = 'block';
-  resultsEl.innerHTML = '<div style="color:#8b949e">봇을 멈추고 대기 중인 메시지를 수집합니다...</div>';
+  btn.textContent = '\uAC10\uC9C0 \uC911... (\uBD07 \uC7AC\uC2DC\uC791\uB428)';
+  var resultsEl = document.getElementById('modal-detect-results');
+  resultsEl.innerHTML = '<div style="color:#8b949e">\uBD07\uC744 \uBA48\uCD94\uACE0 \uB300\uAE30 \uC911\uC778 \uBA54\uC2DC\uC9C0\uB97C \uC218\uC9D1\uD569\uB2C8\uB2E4...</div>';
 
   fetch('/api/bots/' + currentAccessBot + '/access/detect', {method:'POST'})
     .then(function(r){return r.json()})
     .then(function(data) {
       btn.disabled = false;
-      btn.textContent = '그룹/사용자 감지';
+      btn.textContent = '\uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uAC10\uC9C0';
       var html = '';
       var groups = data.groups || [];
       var users = data.users || [];
 
       if (groups.length === 0 && users.length === 0) {
-        resultsEl.innerHTML = '<div class="card" style="padding:12px;color:#8b949e">감지된 그룹/사용자 없음. 봇에게 메시지를 보낸 후 다시 시도하세요.</div>';
+        resultsEl.innerHTML = '<div style="padding:12px;color:#8b949e;font-size:12px">\uAC10\uC9C0\uB41C \uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uC5C6\uC74C. \uBD07\uC5D0\uAC8C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B8 \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.</div>';
         return;
       }
 
       if (groups.length > 0) {
-        html += '<div class="card" style="padding:12px;margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">감지된 그룹</h4>';
+        html += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uADF8\uB8F9</h4>';
         groups.forEach(function(g) {
-          var badge = g.known ? '<span style="color:#3fb950;font-size:11px">등록됨</span>' : '<button onclick="addDetectedGroup(\'' + esc(g.id) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">허용</button>';
+          var badge = g.known ? '<span style="color:#3fb950;font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button onclick="addDetectedGroup(\'' + esc(g.id) + '\')" style="padding:2px 6px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uD5C8\uC6A9</button>';
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
             + '<span><span style="font-family:monospace;font-size:12px">' + esc(g.id) + '</span> <span style="color:#e6edf3">' + esc(g.title) + '</span> <span style="color:#8b949e;font-size:11px">(' + g.type + ')</span></span>'
             + badge + '</div>';
@@ -1783,9 +1915,9 @@ function detectGroups() {
       }
 
       if (users.length > 0) {
-        html += '<div class="card" style="padding:12px"><h4 style="margin:0 0 8px;font-size:13px">감지된 사용자</h4>';
+        html += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uC0AC\uC6A9\uC790</h4>';
         users.forEach(function(u) {
-          var badge = u.known ? '<span style="color:#3fb950;font-size:11px">등록됨</span>' : '<button onclick="addDetectedUser(\'' + esc(u.id) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">허용</button>';
+          var badge = u.known ? '<span style="color:#3fb950;font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button onclick="addDetectedUser(\'' + esc(u.id) + '\')" style="padding:2px 6px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uD5C8\uC6A9</button>';
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
             + '<span><span style="font-family:monospace;font-size:12px">' + esc(u.id) + '</span> <span style="color:#e6edf3">' + esc(u.title) + '</span></span>'
             + badge + '</div>';
@@ -1797,26 +1929,87 @@ function detectGroups() {
     })
     .catch(function(e) {
       btn.disabled = false;
-      btn.textContent = '그룹/사용자 감지';
-      resultsEl.innerHTML = '<div class="card" style="padding:12px;color:#f85149">감지 실패: ' + e + '</div>';
+      btn.textContent = '\uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uAC10\uC9C0';
+      resultsEl.innerHTML = '<div style="padding:12px;color:#f85149">\uAC10\uC9C0 \uC2E4\uD328: ' + e + '</div>';
     });
 }
 
 function addDetectedGroup(gid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_group', id:gid, require_mention:false})
-  }).then(function(){loadAccess(); detectGroups();});
+  }).then(function(){loadAccess();});
 }
 
 function addDetectedUser(uid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_user', id:uid})
-  }).then(function(){loadAccess(); detectGroups();});
+  }).then(function(){loadAccess();});
 }
+
+// Add Bot Modal
+window.showAddBotModal = function() {
+  document.getElementById('add-bot-id').value = '';
+  document.getElementById('add-bot-name').value = '';
+  document.getElementById('add-bot-token').value = '';
+  document.getElementById('add-bot-model').value = '';
+  document.getElementById('add-bot-system-prompt').value = '';
+  document.getElementById('add-bot-type').value = 'telegram';
+  document.getElementById('addBotModal').style.display = 'flex';
+};
+
+window.closeAddBotModal = function() {
+  document.getElementById('addBotModal').style.display = 'none';
+};
+
+document.getElementById('addBotModal').addEventListener('click', function(e) {
+  if (e.target === this) closeAddBotModal();
+});
+
+window.submitAddBot = function() {
+  var id    = document.getElementById('add-bot-id').value.trim();
+  var token = document.getElementById('add-bot-token').value.trim();
+  if (!id || !token) { alert('ID\uC640 \uD1A0\uD070\uC740 \uD544\uC218\uC785\uB2C8\uB2E4.'); return; }
+  var payload = {
+    id:            id,
+    type:          document.getElementById('add-bot-type').value,
+    name:          document.getElementById('add-bot-name').value.trim(),
+    token:         token,
+    model:         document.getElementById('add-bot-model').value.trim(),
+    system_prompt: document.getElementById('add-bot-system-prompt').value.trim(),
+  };
+  fetch('/api/bots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'created') {
+        closeAddBotModal();
+        loadBots();
+      } else {
+        alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data)));
+      }
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.deleteBot = function(id) {
+  if (!confirm(id + ' \uBD07\uC744 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?\n\uC774 \uC791\uC5C5\uC740 \uB418\uB3CC\uB9B4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.')) return;
+  fetch('/api/bots/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'deleted') {
+        loadBots();
+      } else {
+        alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data)));
+      }
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
 
 // Init and auto-refresh
 loadBots();
-loadAccess();
 setInterval(loadBots, 5000);
 setInterval(function() {
   if (document.getElementById('pane-events').classList.contains('active')) loadEvents();

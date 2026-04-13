@@ -45,6 +45,7 @@ type Supervisor struct {
 	entries    []*botEntry
 	mu         sync.RWMutex
 	cancel     context.CancelFunc
+	ctx        context.Context
 
 	// Event log (ring buffer of last 1000 events)
 	events   []Event
@@ -80,6 +81,7 @@ func (s *Supervisor) Register(b *bot.Bot) {
 func (s *Supervisor) Start(ctx context.Context) {
 	childCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
+	s.ctx = childCtx
 
 	s.mu.RLock()
 	count := 0
@@ -301,6 +303,35 @@ func (s *Supervisor) GetEvents(limit int) []Event {
 	result := make([]Event, limit)
 	copy(result, s.events[start:])
 	return result
+}
+
+// RegisterAndStart adds a bot to the supervisor and starts it if enabled and supervisor is running.
+func (s *Supervisor) RegisterAndStart(b *bot.Bot) {
+	entry := &botEntry{bot: b, restartCh: make(chan struct{}, 1)}
+	s.mu.Lock()
+	s.entries = append(s.entries, entry)
+	s.mu.Unlock()
+	s.logEvent(b.Config.ID, "registered", "added via API")
+	if b.Config.Enabled && s.ctx != nil {
+		go s.runBot(s.ctx, entry)
+	}
+}
+
+// RemoveBot stops and removes a bot from the supervisor.
+func (s *Supervisor) RemoveBot(botID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.entries {
+		if e.bot.Config.ID == botID {
+			if e.bot.Process != nil {
+				e.bot.Process.Stop()
+			}
+			s.entries = append(s.entries[:i], s.entries[i+1:]...)
+			s.logEvent(botID, "removed", "removed via API")
+			return nil
+		}
+	}
+	return fmt.Errorf("bot %s not found", botID)
 }
 
 // RestartBot signals the runBot goroutine for the given bot to restart immediately.

@@ -171,6 +171,15 @@ func Load(path string) (*Root, error) {
 	return &root, nil
 }
 
+// Save writes the Root config to path as YAML.
+func Save(path string, root *Root) error {
+	data, err := yaml.Marshal(root)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
 // resolveEnvVars replaces ${VAR_NAME} with environment variable values
 func resolveEnvVars(s string) string {
 	result := s
