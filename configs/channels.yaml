@@ -21,9 +21,9 @@ bots:
       name: 메인 봇
       enabled: true
       token: 8660591240:AAHbICzUlum_QkYtzYbr3ti_lzdbcBsGSiw
-      plugin: telegram
-      plugin_dir: ./plugins/telegram
-      plugin_marketplace: claude-plugins-official
+      plugin: telegram-enhanced
+      plugin_dir: ""
+      plugin_marketplace: claude-channel-hub
       claude_version: ""
       model: ""
       system_prompt: ""
