@@ -130,6 +130,12 @@ func (p *Process) Start(ctx context.Context) error {
 		return fmt.Errorf("marshal channels: %w", err)
 	}
 	env = append(env, fmt.Sprintf("HARNESS_CHANNELS_CONFIG=%s", string(channelsJSON)))
+
+	// Per-bot data directory for memory/profile storage
+	botDataDir := filepath.Join(home, ".claude-channel-hub", "data", p.bot.Config.ID)
+	os.MkdirAll(botDataDir, 0755)
+	env = append(env, fmt.Sprintf("HARNESS_DATA_DIR=%s", botDataDir))
+
 	cmd.Env = env
 	p.cmd = cmd
 

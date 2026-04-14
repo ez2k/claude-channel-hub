@@ -69,9 +69,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Conversations (keep existing)
 	mux.HandleFunc("/api/conversations/", s.handleConversations)
 
-	// Memory viewer
-	mux.HandleFunc("/api/memory", s.handleMemory)
-	mux.HandleFunc("/api/memory/", s.handleMemoryAction)
+	// Memory is per-bot, handled via /api/bots/:id/memory in handleBotAction
 
 	// Dashboard
 	mux.HandleFunc("/", s.handleDashboard)
@@ -292,6 +290,19 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 	// POST /api/bots/:id/access/detect
 	if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "access" && parts[2] == "detect" {
 		s.handleBotAccessDetect(w, r, botID)
+		return
+	}
+
+	// GET /api/bots/:id/memory — list users with memory for this bot
+	if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "memory" {
+		s.handleBotMemory(w, r, botID)
+		return
+	}
+
+	// GET /api/bots/:id/memory/:user_id — list memories for user
+	// DELETE /api/bots/:id/memory/:user_id/:memory_id — delete memory
+	if len(parts) >= 3 && parts[1] == "memory" {
+		s.handleBotMemoryAction(w, r, botID, parts[2:])
 		return
 	}
 
@@ -791,19 +802,18 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, conv)
 }
 
-// --- Memory API ---
+// --- Per-Bot Memory API ---
 
-func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	dataDir := os.Getenv("HARNESS_DATA_DIR")
-	if dataDir == "" {
-		home, _ := os.UserHomeDir()
-		dataDir = filepath.Join(home, ".claude-channel-hub", "data")
-	}
-	memDir := filepath.Join(dataDir, "memory")
+func botDataDir(botID string) string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude-channel-hub", "data", botID)
+}
 
+func (s *Server) handleBotMemory(w http.ResponseWriter, r *http.Request, botID string) {
+	memDir := filepath.Join(botDataDir(botID), "memory")
 	entries, err := os.ReadDir(memDir)
 	if err != nil {
-		writeJSON(w, map[string]interface{}{"users": []interface{}{}})
+		writeJSON(w, map[string]interface{}{"bot": botID, "users": []interface{}{}})
 		return
 	}
 
@@ -825,37 +835,20 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 			"count":   len(memories),
 		})
 	}
-	writeJSON(w, map[string]interface{}{"users": users})
+	writeJSON(w, map[string]interface{}{"bot": botID, "users": users})
 }
 
-func (s *Server) handleMemoryAction(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/memory/")
-	parts := splitPath(strings.Trim(path, "/"))
-
-	dataDir := os.Getenv("HARNESS_DATA_DIR")
-	if dataDir == "" {
-		home, _ := os.UserHomeDir()
-		dataDir = filepath.Join(home, ".claude-channel-hub", "data")
-	}
-
-	if len(parts) < 1 {
-		http.Error(w, "missing user_id", 400)
-		return
-	}
-
+func (s *Server) handleBotMemoryAction(w http.ResponseWriter, r *http.Request, botID string, parts []string) {
 	uid := parts[0]
-	memFile := filepath.Join(dataDir, "memory", uid, "memories.json")
+	memFile := filepath.Join(botDataDir(botID), "memory", uid, "memories.json")
 
 	if r.Method == http.MethodGet {
 		data, err := os.ReadFile(memFile)
 		if err != nil {
-			writeJSON(w, map[string]interface{}{"user_id": uid, "memories": []interface{}{}})
+			writeJSON(w, map[string]interface{}{"bot": botID, "user_id": uid, "memories": []interface{}{}})
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(fmt.Sprintf(`{"user_id":"%s","memories":`, uid)))
-		w.Write(data)
-		w.Write([]byte("}"))
+		writeJSON(w, json.RawMessage(fmt.Sprintf(`{"bot":"%s","user_id":"%s","memories":%s}`, botID, uid, string(data))))
 		return
 	}
 
@@ -872,7 +865,7 @@ func (s *Server) handleMemoryAction(w http.ResponseWriter, r *http.Request) {
 		}
 		out, _ := json.MarshalIndent(filtered, "", "  ")
 		os.WriteFile(memFile, out, 0644)
-		writeJSON(w, map[string]string{"status": "deleted", "id": memID})
+		writeJSON(w, map[string]string{"status": "deleted", "bot": botID, "id": memID})
 		return
 	}
 
@@ -1305,7 +1298,6 @@ body {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="section-title" style="margin:0">&#xBD07; &#xC0C1;&#xD0DC;</div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button onclick="showMemoryModal()" style="padding:6px 14px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">&#xBA54;&#xBAA8;&#xB9AC;</button>
         <button onclick="showAddBotModal()" style="padding:6px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ &#xBD07; &#xCD94;&#xAC00;</button>
       </div>
     </div>
@@ -1424,7 +1416,7 @@ body {
 <div id="memoryModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
   <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:860px;width:95%;max-height:85vh;display:flex;flex-direction:column">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 style="margin:0;font-size:16px">&#xBA54;&#xBAA8;&#xB9AC; &#xBDF0;&#xC5B4;</h3>
+      <h3 id="memoryModalTitle" style="margin:0;font-size:16px">&#xBA54;&#xBAA8;&#xB9AC;</h3>
       <button onclick="closeMemoryModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
     </div>
     <div style="display:flex;gap:16px;flex:1;min-height:0;overflow:hidden">
@@ -1616,7 +1608,8 @@ function renderBots(bots) {
             '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
             '<button class="btn btn-logs"    onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</button>' +
             '<button class="btn btn-status"  onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</button>' +
-            '<button class="btn btn-logs"    onclick="showAccessModal(\'' + bid + '\')">\uC811\uADFC \uAD00\uB9AC</button>' +
+            '<button class="btn btn-logs"    onclick="showAccessModal(\'' + bid + '\')">접근 관리</button>' +
+            '<button class="btn btn-status"  onclick="showMemoryModal(\'' + bid + '\')">메모리</button>' +
             '<button class="btn" style="color:#f85149;border-color:rgba(248,81,73,.4)" onclick="deleteBot(\'' + bid + '\')">\uC0AD\uC81C</button>' +
           '</div>' +
         '</div>' +
@@ -2221,8 +2214,13 @@ window.deleteBot = function(id) {
     .catch(function(e) { alert('\uC624\uB958: ' + e); });
 };
 
-// Memory Modal
-window.showMemoryModal = function() {
+// Memory Modal (per-bot)
+var currentMemoryBot = '';
+
+window.showMemoryModal = function(botId) {
+  currentMemoryBot = botId;
+  document.getElementById('memoryModalTitle').textContent = botId + ' 메모리';
+  document.getElementById('memory-list').innerHTML = '<div style="color:#8b949e">사용자를 선택하세요</div>';
   document.getElementById('memoryModal').style.display = 'flex';
   loadMemoryUsers();
 };
@@ -2235,49 +2233,49 @@ document.getElementById('memoryModal').addEventListener('click', function(e) {
   if (e.target === this) closeMemoryModal();
 });
 
-function loadMemoryUsers() {
-  fetch('/api/memory').then(function(r) { return r.json(); }).then(function(data) {
+window.loadMemoryUsers = function() {
+  fetch('/api/bots/' + currentMemoryBot + '/memory').then(function(r) { return r.json(); }).then(function(data) {
     var users = data.users || [];
     var el = document.getElementById('memory-user-list');
     if (!users.length) {
-      el.innerHTML = '<div style="color:#8b949e;font-size:12px;padding:8px">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      el.innerHTML = '<div style="color:#8b949e;font-size:12px;padding:8px">메모리 없음</div>';
       return;
     }
     el.innerHTML = users.map(function(u) {
       return '<div onclick="loadMemories(\'' + esc(u.user_id) + '\')" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #21262d;font-size:12px">'
         + '<span style="font-family:monospace">' + esc(u.user_id) + '</span>'
-        + ' <span style="color:#8b949e">(' + u.count + '\uAC74)</span></div>';
+        + ' <span style="color:#8b949e">(' + u.count + '건)</span></div>';
     }).join('');
   });
-}
+};
 
 window.loadMemories = function(uid) {
-  fetch('/api/memory/' + uid).then(function(r) { return r.json(); }).then(function(data) {
+  fetch('/api/bots/' + currentMemoryBot + '/memory/' + uid).then(function(r) { return r.json(); }).then(function(data) {
     var el = document.getElementById('memory-list');
     var memories = data.memories || [];
     if (!memories.length) {
-      el.innerHTML = '<div style="color:#8b949e">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      el.innerHTML = '<div style="color:#8b949e">메모리 없음</div>';
       return;
     }
-    el.innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">\uC0AC\uC6A9\uC790: ' + esc(uid) + ' (' + memories.length + '\uAC74)</div>' +
+    el.innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">사용자: ' + esc(uid) + ' (' + memories.length + '건)</div>' +
       memories.map(function(m) {
         var typeColors = {preference:'#3fb950',context:'#58a6ff',correction:'#f85149',fact:'#d2a8ff',general:'#8b949e'};
         var color = typeColors[m.type] || '#8b949e';
         return '<div style="padding:8px;border:1px solid #21262d;border-radius:6px;margin-bottom:6px">'
           + '<div style="display:flex;justify-content:space-between;align-items:center">'
           + '<span style="font-size:11px;color:' + color + ';font-weight:bold">' + esc(m.type || 'general') + '</span>'
-          + '<button onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="padding:1px 6px;background:#da3633;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:10px">\uC0AD\uC81C</button>'
+          + '<button onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="padding:1px 6px;background:#da3633;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:10px">삭제</button>'
           + '</div>'
           + '<div style="margin-top:4px;font-size:13px">' + esc(m.content) + '</div>'
-          + '<div style="margin-top:4px;font-size:10px;color:#8b949e">\uAC00\uC911\uCE58: ' + (m.weight||0).toFixed(1) + ' | \uC870\uD68C: ' + (m.accessCount||0) + '\uD68C | ' + (m.createdAt||'').slice(0,10) + '</div>'
+          + '<div style="margin-top:4px;font-size:10px;color:#8b949e">가중치: ' + (m.weight||0).toFixed(1) + ' | 조회: ' + (m.accessCount||0) + '회 | ' + (m.createdAt||'').slice(0,10) + '</div>'
           + '</div>';
       }).join('');
   });
 };
 
 window.deleteMemory = function(uid, mid) {
-  if (!confirm('\uC774 \uBA54\uBAA8\uB9AC\uB97C \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
-  fetch('/api/memory/' + uid + '/' + mid, {method:'DELETE'})
+  if (!confirm('이 메모리를 삭제하시겠습니까?')) return;
+  fetch('/api/bots/' + currentMemoryBot + '/memory/' + uid + '/' + mid, {method:'DELETE'})
     .then(function() { loadMemories(uid); });
 };
 
