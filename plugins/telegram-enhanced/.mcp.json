@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "telegram-enhanced": {
-      "command": "bun",
-      "args": ["server.ts"],
-      "cwd": "/root/claude-ezix-agent/plugins/telegram-enhanced"
+      "command": "/root/.bun/bin/bun",
+      "args": ["/root/claude-ezix-agent/plugins/telegram-enhanced/server.ts"]
     }
   }
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -83,17 +84,22 @@ func (p *Process) Start(ctx context.Context) error {
 		args = append(args, "--continue")
 	}
 
-	// Channel mode: official plugin or development server
+	// Channel mode
 	if p.bot.Config.PluginMarketplace != "" {
 		// Official plugin: plugin:name@marketplace via --channels
 		channelRef := fmt.Sprintf("plugin:%s@%s", p.bot.Config.Plugin, p.bot.Config.PluginMarketplace)
 		args = append(args, "--channels", channelRef)
 	} else if p.bot.Config.PluginDir != "" {
-		// Development channel: server:name via --dangerously-load-development-channels + --mcp-config
+		// Development channel per docs: place .mcp.json in working directory,
+		// then --dangerously-load-development-channels server:name
 		pluginAbsDir, _ := filepath.Abs(p.bot.Config.PluginDir)
-		mcpConfig := filepath.Join(pluginAbsDir, ".mcp.json")
+		// Copy .mcp.json to bot's working directory so Claude Code reads it automatically
+		srcMcp := filepath.Join(pluginAbsDir, ".mcp.json")
+		dstMcp := filepath.Join(h, ".claude-channel-hub", "data", p.bot.Config.ID, ".mcp.json")
+		if data, err := os.ReadFile(srcMcp); err == nil {
+			os.WriteFile(dstMcp, data, 0644)
+		}
 		serverName := fmt.Sprintf("server:%s", p.bot.Config.Plugin)
-		args = append(args, "--mcp-config", mcpConfig)
 		args = append(args, "--dangerously-load-development-channels", serverName)
 	}
 	if p.bot.Config.Model != "" {
@@ -144,6 +150,9 @@ func (p *Process) Start(ctx context.Context) error {
 	os.MkdirAll(botDataDir, 0755)
 	env = append(env, fmt.Sprintf("HARNESS_DATA_DIR=%s", botDataDir))
 
+	// Disable OMC hooks to prevent stop hooks from killing bot sessions
+	env = append(env, "DISABLE_OMC=1")
+
 	cmd.Env = env
 	// Per-bot working directory so --continue resumes the correct session
 	cmd.Dir = botDataDir
@@ -160,6 +169,15 @@ func (p *Process) Start(ctx context.Context) error {
 
 	p.state = StateRunning
 	p.startedAt = time.Now()
+
+	// Auto-dismiss startup prompts (development channels warning, etc.)
+	// Send CR (Enter key in PTY) after delays to confirm any blocking prompts
+	go func() {
+		for _, d := range []int{2, 4, 6, 8} {
+			time.Sleep(time.Duration(d) * time.Second)
+			ptmx.Write([]byte("\r"))
+		}
+	}()
 
 	// Capture PTY output to log file for debugging
 	logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", p.bot.Config.ID)
@@ -191,15 +209,18 @@ func (p *Process) Start(ctx context.Context) error {
 				text := string(recent)
 				// Auto-answer known prompts
 				if containsPrompt(text, "Do you want to use this API key") {
-					ptmx.Write([]byte("2\n")) // No
+					ptmx.Write([]byte("2\r")) // No
+					recent = nil
+				} else if containsPrompt(text, "local development") ||
+					containsPrompt(text, "Loading development channels") {
+					ptmx.Write([]byte("\r")) // Confirm (Enter)
 					recent = nil
 				} else if containsPrompt(text, "Trust this workspace") ||
 					containsPrompt(text, "trust this project") {
-					ptmx.Write([]byte("y\n"))
+					ptmx.Write([]byte("y\r"))
 					recent = nil
-				} else if containsPrompt(text, "Yes") && containsPrompt(text, "No") &&
-					containsPrompt(text, "1.") && containsPrompt(text, "2.") {
-					ptmx.Write([]byte("1\n")) // Default to first option
+				} else if containsPrompt(text, "Enter to confirm") {
+					ptmx.Write([]byte("\n"))
 					recent = nil
 				}
 			}
@@ -312,7 +333,11 @@ func (p *Process) Wait() {
 // Output returns the PTY master for reading process output.
 func (p *Process) Output() *os.File { return p.ptmx }
 
-// containsPrompt checks if text contains a prompt string (case-insensitive, ignoring ANSI codes).
+// ansiStripRe strips ANSI escape sequences for prompt matching.
+var ansiStripRe = regexp.MustCompile(`\x1b[^a-zA-Z~]*[a-zA-Z~]`)
+
+// containsPrompt checks if text contains a prompt string (case-insensitive, ANSI stripped).
 func containsPrompt(text, prompt string) bool {
-	return strings.Contains(strings.ToLower(text), strings.ToLower(prompt))
+	clean := ansiStripRe.ReplaceAllString(text, "")
+	return strings.Contains(strings.ToLower(clean), strings.ToLower(prompt))
 }
