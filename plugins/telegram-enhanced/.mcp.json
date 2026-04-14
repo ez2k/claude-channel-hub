@@ -2,7 +2,8 @@
   "mcpServers": {
     "telegram-enhanced": {
       "command": "bun",
-      "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "--shell=bun", "--silent", "start"]
+      "args": ["server.ts"],
+      "cwd": "/root/claude-ezix-agent/plugins/telegram-enhanced"
     }
   }
 }

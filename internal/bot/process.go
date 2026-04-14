@@ -74,26 +74,27 @@ func (p *Process) Start(ctx context.Context) error {
 	childCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 
-	// Build channel reference
-	channelRef := p.bot.Config.Plugin
-	if p.bot.Config.PluginMarketplace != "" {
-		channelRef = fmt.Sprintf("plugin:%s@%s", p.bot.Config.Plugin, p.bot.Config.PluginMarketplace)
-	} else {
-		channelRef = fmt.Sprintf("server:%s", p.bot.Config.Plugin)
-	}
+	args := []string{"--dangerously-skip-permissions"}
 
-	args := []string{
-		"--channels", channelRef,
-		"--dangerously-skip-permissions",
-	}
 	// Resume previous session if one exists in the bot's working directory
 	h, _ := os.UserHomeDir()
 	sessDir := filepath.Join(h, ".claude-channel-hub", "data", p.bot.Config.ID, ".claude", "sessions")
 	if entries, err := os.ReadDir(sessDir); err == nil && len(entries) > 0 {
-		args = append([]string{"--continue"}, args...)
+		args = append(args, "--continue")
 	}
-	if p.bot.Config.PluginMarketplace == "" && p.bot.Config.PluginDir != "" {
-		args = append(args, "--plugin-dir", p.bot.Config.PluginDir)
+
+	// Channel mode: official plugin or development server
+	if p.bot.Config.PluginMarketplace != "" {
+		// Official plugin: plugin:name@marketplace via --channels
+		channelRef := fmt.Sprintf("plugin:%s@%s", p.bot.Config.Plugin, p.bot.Config.PluginMarketplace)
+		args = append(args, "--channels", channelRef)
+	} else if p.bot.Config.PluginDir != "" {
+		// Development channel: server:name via --dangerously-load-development-channels + --mcp-config
+		pluginAbsDir, _ := filepath.Abs(p.bot.Config.PluginDir)
+		mcpConfig := filepath.Join(pluginAbsDir, ".mcp.json")
+		serverName := fmt.Sprintf("server:%s", p.bot.Config.Plugin)
+		args = append(args, "--mcp-config", mcpConfig)
+		args = append(args, "--dangerously-load-development-channels", serverName)
 	}
 	if p.bot.Config.Model != "" {
 		args = append(args, "--model", p.bot.Config.Model)
