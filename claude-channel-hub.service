@@ -13,6 +13,7 @@ EnvironmentFile=/root/claude-ezix-agent/.env
 Environment=HOME=/root
 Environment=PATH=/root/.local/bin:/root/.bun/bin:/root/.nvm/versions/node/v22.18.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=TERM=xterm-256color
+Environment=IS_SANDBOX=1
 
 # Logging
 StandardOutput=journal
