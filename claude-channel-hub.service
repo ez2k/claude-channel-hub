@@ -1,0 +1,27 @@
+[Unit]
+Description=Claude Channel Hub — Bot/Channel Orchestrator
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/claude-ezix-agent
+ExecStart=/root/claude-ezix-agent/bin/claude-channel-hub -config /root/claude-ezix-agent/configs/channels.yaml
+Restart=always
+RestartSec=5
+EnvironmentFile=/root/claude-ezix-agent/.env
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/root/.bun/bin:/root/.nvm/versions/node/v22.18.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=TERM=xterm-256color
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=claude-channel-hub
+
+# Security
+NoNewPrivileges=false
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

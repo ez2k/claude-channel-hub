@@ -83,7 +83,8 @@ func (p *Process) Start(ctx context.Context) error {
 
 	args := []string{
 		"--channels", channelRef,
-		"--dangerously-skip-permissions",
+		"--allow-dangerously-skip-permissions",
+		"--permission-mode", "bypassPermissions",
 	}
 	if p.bot.Config.PluginMarketplace == "" && p.bot.Config.PluginDir != "" {
 		args = append(args, "--plugin-dir", p.bot.Config.PluginDir)
