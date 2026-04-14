@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,9 +83,14 @@ func (p *Process) Start(ctx context.Context) error {
 	}
 
 	args := []string{
-		"--continue",
 		"--channels", channelRef,
 		"--dangerously-skip-permissions",
+	}
+	// Resume previous session if one exists in the bot's working directory
+	h, _ := os.UserHomeDir()
+	sessDir := filepath.Join(h, ".claude-channel-hub", "data", p.bot.Config.ID, ".claude", "sessions")
+	if entries, err := os.ReadDir(sessDir); err == nil && len(entries) > 0 {
+		args = append([]string{"--continue"}, args...)
 	}
 	if p.bot.Config.PluginMarketplace == "" && p.bot.Config.PluginDir != "" {
 		args = append(args, "--plugin-dir", p.bot.Config.PluginDir)
@@ -161,13 +167,54 @@ func (p *Process) Start(ctx context.Context) error {
 		os.Rename(logPath, logPath+".1")
 	}
 	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+
+	// Auto-answer prompts: monitor PTY output for known prompts and send responses
+	pr, pw := io.Pipe()
 	go func() {
-		if logFile != nil {
-			io.Copy(logFile, ptmx)
-			logFile.Close()
-		} else {
-			io.Copy(io.Discard, ptmx)
+		buf := make([]byte, 4096)
+		var recent []byte
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				// Write to log file
+				if logFile != nil {
+					logFile.Write(buf[:n])
+				}
+				// Write to pipe for downstream consumers
+				pw.Write(buf[:n])
+				// Check recent output for prompts
+				recent = append(recent, buf[:n]...)
+				if len(recent) > 8192 {
+					recent = recent[len(recent)-8192:]
+				}
+				text := string(recent)
+				// Auto-answer known prompts
+				if containsPrompt(text, "Do you want to use this API key") {
+					ptmx.Write([]byte("2\n")) // No
+					recent = nil
+				} else if containsPrompt(text, "Trust this workspace") ||
+					containsPrompt(text, "trust this project") {
+					ptmx.Write([]byte("y\n"))
+					recent = nil
+				} else if containsPrompt(text, "Yes") && containsPrompt(text, "No") &&
+					containsPrompt(text, "1.") && containsPrompt(text, "2.") {
+					ptmx.Write([]byte("1\n")) // Default to first option
+					recent = nil
+				}
+			}
+			if err != nil {
+				pw.Close()
+				if logFile != nil {
+					logFile.Close()
+				}
+				return
+			}
 		}
+	}()
+
+	// Drain pipe to avoid blocking
+	go func() {
+		io.Copy(io.Discard, pr)
 	}()
 
 	// Transition state when process exits
@@ -263,3 +310,8 @@ func (p *Process) Wait() {
 
 // Output returns the PTY master for reading process output.
 func (p *Process) Output() *os.File { return p.ptmx }
+
+// containsPrompt checks if text contains a prompt string (case-insensitive, ignoring ANSI codes).
+func containsPrompt(text, prompt string) bool {
+	return strings.Contains(strings.ToLower(text), strings.ToLower(prompt))
+}
