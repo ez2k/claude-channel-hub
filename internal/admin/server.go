@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/ez2k/claude-channel-hub/internal/store"
 	"github.com/ez2k/claude-channel-hub/internal/supervisor"
 	"github.com/ez2k/claude-channel-hub/internal/version"
+	"gopkg.in/yaml.v3"
 )
 
 type Server struct {
@@ -60,6 +62,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/config", s.handleConfig)
 
 	// Access control is per-bot, handled via /api/bots/:id/access and /api/bots/:id/access/detect
+
+	// Skills
+	mux.HandleFunc("/api/skills", s.handleSkills)
+	mux.HandleFunc("/api/skills/", s.handleSkillAction)
 
 	// System
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -874,6 +880,164 @@ func (s *Server) handleBotMemoryAction(w http.ResponseWriter, r *http.Request, b
 
 // --- Dashboard ---
 
+// --- Skills API ---
+
+func skillsDir() string {
+	abs, err := filepath.Abs("skills")
+	if err != nil {
+		return "skills"
+	}
+	return abs
+}
+
+func parseSkillFrontmatter(content string) map[string]interface{} {
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		return nil
+	}
+	var meta map[string]interface{}
+	yaml.Unmarshal([]byte(parts[1]), &meta) //nolint:errcheck
+	return meta
+}
+
+func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
+	dir := skillsDir()
+	switch r.Method {
+	case http.MethodGet:
+		type SkillEntry struct {
+			Category    string `json:"category"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Version     string `json:"version"`
+			Path        string `json:"path"`
+		}
+		var skills []SkillEntry
+		fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if d.Name() != "SKILL.md" {
+				return nil
+			}
+			parts := strings.Split(filepath.ToSlash(path), "/")
+			if len(parts) < 2 {
+				return nil
+			}
+			category := parts[0]
+			name := parts[1]
+			if len(parts) == 2 {
+				// skills/research/SKILL.md -> category=research, name=research
+				name = category
+			} else {
+				// skills/research/arxiv/SKILL.md -> category=research, name=arxiv
+				name = parts[len(parts)-2]
+			}
+			data, readErr := os.ReadFile(filepath.Join(dir, path))
+			if readErr != nil {
+				return nil
+			}
+			meta := parseSkillFrontmatter(string(data))
+			desc := ""
+			ver := ""
+			if meta != nil {
+				if v, ok := meta["description"].(string); ok {
+					desc = v
+				}
+				if v, ok := meta["version"].(string); ok {
+					ver = v
+				}
+			}
+			skills = append(skills, SkillEntry{
+				Category:    category,
+				Name:        name,
+				Description: desc,
+				Version:     ver,
+				Path:        category + "/" + name,
+			})
+			return nil
+		})
+		if skills == nil {
+			skills = []SkillEntry{}
+		}
+		writeJSON(w, map[string]interface{}{"skills": skills, "total": len(skills)})
+
+	case http.MethodPost:
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Category string `json:"category"`
+			Name     string `json:"name"`
+			Content  string `json:"content"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || req.Category == "" || req.Name == "" || req.Content == "" {
+			http.Error(w, "category, name, and content required", 400)
+			return
+		}
+		// Sanitize inputs
+		req.Category = filepath.Base(req.Category)
+		req.Name = filepath.Base(req.Name)
+		skillPath := filepath.Join(dir, req.Category, req.Name)
+		if err := os.MkdirAll(skillPath, 0755); err != nil {
+			http.Error(w, "failed to create directory: "+err.Error(), 500)
+			return
+		}
+		if err := os.WriteFile(filepath.Join(skillPath, "SKILL.md"), []byte(req.Content), 0644); err != nil {
+			http.Error(w, "failed to write file: "+err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "created", "path": req.Category + "/" + req.Name})
+
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+func (s *Server) handleSkillAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/skills/")
+	parts := splitPath(strings.Trim(path, "/"))
+	if len(parts) < 2 {
+		http.Error(w, "path must be /api/skills/:category/:name", 400)
+		return
+	}
+	category := filepath.Base(parts[0])
+	name := filepath.Base(parts[1])
+	dir := skillsDir()
+
+	// Determine skill file path: try category/name/SKILL.md first, then category/SKILL.md if name==category
+	skillFile := filepath.Join(dir, category, name, "SKILL.md")
+	if _, err := os.Stat(skillFile); os.IsNotExist(err) {
+		// fallback: category-level skill (e.g. research/SKILL.md where name==category)
+		alt := filepath.Join(dir, category, "SKILL.md")
+		if _, altErr := os.Stat(alt); altErr == nil && name == category {
+			skillFile = alt
+		}
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		data, err := os.ReadFile(skillFile)
+		if err != nil {
+			http.Error(w, "skill not found", 404)
+			return
+		}
+		writeJSON(w, map[string]string{"category": category, "name": name, "content": string(data)})
+
+	case http.MethodDelete:
+		skillDir := filepath.Join(dir, category, name)
+		if _, err := os.Stat(skillDir); os.IsNotExist(err) {
+			http.Error(w, "skill not found", 404)
+			return
+		}
+		if err := os.RemoveAll(skillDir); err != nil {
+			http.Error(w, "failed to delete: "+err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "deleted", "path": category + "/" + name})
+
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, dashboardHTML)
@@ -1444,6 +1608,7 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
     <div class="sidebar-item" data-tab="events"><span class="sidebar-icon">&#x25F7;</span> &#xC774;&#xBCA4;&#xD2B8;</div>
     <div class="sidebar-item" data-tab="versions"><span class="sidebar-icon">&#x2B06;</span> &#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
     <div class="sidebar-section">&#xC2DC;&#xC2A4;&#xD15C;</div>
+    <div class="sidebar-item" data-tab="skills"><span class="sidebar-icon">&#x1F4DA;</span> &#xC2A4;&#xD0AC;</div>
     <div class="sidebar-item" data-tab="config"><span class="sidebar-icon">&#x2699;</span> &#xC124;&#xC815;</div>
     <div class="sidebar-item" data-tab="troubleshoot"><span class="sidebar-icon">&#x26A0;</span> &#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
   </nav>
@@ -1526,6 +1691,23 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
           <input class="form-input" id="install-ver-input" type="text" placeholder="2.1.104">
         </div>
         <button class="btn-primary" onclick="installVersion()">&#xC124;&#xCE58;</button>
+      </div>
+    </div>
+
+    <!-- Skills tab -->
+    <div class="tab-pane" id="pane-skills">
+      <div class="summary-row">
+        <div class="summary-card blue">
+          <div class="s-val" id="sum-skills">&#x2014;</div>
+          <div class="s-lbl">&#xC804;&#xCCB4; &#xC2A4;&#xD0AC;</div>
+        </div>
+      </div>
+      <div class="section-bar">
+        <div class="section-title" style="margin:0">&#xC2A4;&#xD0AC; &#xBAA9;&#xB85D;</div>
+        <button class="btn-add" onclick="window.showAddSkillModal()">+ &#xC2A4;&#xD0AC; &#xCD94;&#xAC00;</button>
+      </div>
+      <div class="bot-grid" id="skill-grid">
+        <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
       </div>
     </div>
 
@@ -1705,6 +1887,7 @@ document.querySelectorAll('.sidebar-item').forEach(function(item) {
     if (name === 'events')       loadEvents();
     if (name === 'versions')     loadVersions();
     if (name === 'config')       loadConfig();
+    if (name === 'skills')       window.loadSkills();
     if (name === 'troubleshoot') initTroubleshoot();
     // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('mobile-open');
@@ -2594,7 +2777,134 @@ setInterval(function() {
   }
 }, 5000);
 
+// ===== Skills =====
+window.loadSkills = function() {
+  fetch('/api/skills').then(function(r) { return r.json(); }).then(function(data) {
+    var skills = data.skills || [];
+    document.getElementById('sum-skills').textContent = data.total || 0;
+    var grid = document.getElementById('skill-grid');
+    if (!skills.length) {
+      grid.innerHTML = '<div class="empty-state">\uC2A4\uD0AC \uC5C6\uC74C</div>';
+      return;
+    }
+    var catColors = ['var(--blue)','var(--green)','var(--purple)','var(--yellow)','var(--red)'];
+    var catMap = {};
+    var colorIdx = 0;
+    grid.innerHTML = skills.map(function(sk) {
+      if (!(sk.category in catMap)) { catMap[sk.category] = catColors[colorIdx++ % catColors.length]; }
+      var color = catMap[sk.category];
+      return '<div class="bot-card" style="cursor:pointer" onclick="window.viewSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">'
+        + '<div class="bot-card-header">'
+        + '<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:' + color + '20;color:' + color + '">' + esc(sk.category) + '</span>'
+        + '<button class="btn btn-logs btn-sm" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();window.deleteSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">\uC0AD\uC81C</button>'
+        + '</div>'
+        + '<div class="bot-name" style="margin-top:8px">' + esc(sk.name) + '</div>'
+        + '<div style="font-size:12px;color:var(--text2);margin-top:4px">' + esc(sk.description || '') + '</div>'
+        + (sk.version ? '<div style="font-size:11px;color:var(--text3);margin-top:4px">v' + esc(sk.version) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  });
+};
+
+window.viewSkill = function(category, name) {
+  fetch('/api/skills/' + encodeURIComponent(category) + '/' + encodeURIComponent(name))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      document.getElementById('skillDetailTitle').textContent = category + '/' + name;
+      document.getElementById('skillDetailContent').textContent = data.content || '';
+      openModal('skillDetailModal');
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.closeSkillDetailModal = function() {
+  closeModalById('skillDetailModal');
+};
+
+window.deleteSkill = function(category, name) {
+  if (!confirm(category + '/' + name + ' \uC2A4\uD0AC\uC744 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  fetch('/api/skills/' + encodeURIComponent(category) + '/' + encodeURIComponent(name), {method:'DELETE'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'deleted') { window.loadSkills(); }
+      else { alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data))); }
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+window.showAddSkillModal = function() {
+  document.getElementById('add-skill-category').value = '';
+  document.getElementById('add-skill-name').value = '';
+  document.getElementById('add-skill-content').value = '';
+  openModal('addSkillModal');
+};
+
+window.closeAddSkillModal = function() {
+  closeModalById('addSkillModal');
+};
+
+window.submitAddSkill = function() {
+  var category = document.getElementById('add-skill-category').value.trim();
+  var name = document.getElementById('add-skill-name').value.trim();
+  var content = document.getElementById('add-skill-content').value.trim();
+  if (!category || !name || !content) { alert('\uCE74\uD14C\uACE0\uB9AC, \uC774\uB984, \uB0B4\uC6A9\uC740 \uD544\uC218\uC785\uB2C8\uB2E4.'); return; }
+  fetch('/api/skills', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({category:category, name:name, content:content})})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'created') { window.closeAddSkillModal(); window.loadSkills(); }
+      else { alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data))); }
+    })
+    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+document.getElementById('skillDetailModal').addEventListener('click', function(e) { if (e.target === this) window.closeSkillDetailModal(); });
+document.getElementById('addSkillModal').addEventListener('click', function(e) { if (e.target === this) window.closeAddSkillModal(); });
+
 })();
 </script>
+
+<!-- Skill Detail Modal -->
+<div class="modal-overlay" id="skillDetailModal">
+  <div class="modal modal-wide" style="height:70vh">
+    <div class="modal-header">
+      <div class="modal-title" id="skillDetailTitle">\uC2A4\uD0AC</div>
+      <button class="modal-close" onclick="window.closeSkillDetailModal()">\u2715</button>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-log" id="skillDetailContent" style="white-space:pre-wrap;word-break:break-word"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Add Skill Modal -->
+<div class="modal-overlay" id="addSkillModal">
+  <div class="modal modal-narrow">
+    <div class="modal-header">
+      <div class="modal-title">\uC2A4\uD0AC \uCD94\uAC00</div>
+      <button class="modal-close" onclick="window.closeAddSkillModal()">\u2715</button>
+    </div>
+    <div class="modal-body">
+      <div class="add-bot-form">
+        <div>
+          <label class="add-bot-label">\uCE74\uD14C\uACE0\uB9AC <span class="req">*</span></label>
+          <input id="add-skill-category" class="add-bot-input" placeholder="research">
+        </div>
+        <div>
+          <label class="add-bot-label">\uC774\uB984 <span class="req">*</span></label>
+          <input id="add-skill-name" class="add-bot-input" placeholder="my-skill">
+        </div>
+        <div>
+          <label class="add-bot-label">SKILL.md \uB0B4\uC6A9 <span class="req">*</span></label>
+          <textarea id="add-skill-content" class="add-bot-textarea" rows="8" placeholder="---\nname: my-skill\ndescription: ...\n---\n\n# My Skill\n..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" style="color:var(--text);border-color:var(--border)" onclick="window.closeAddSkillModal()">\uCDE8\uC18C</button>
+      <button class="btn-add" onclick="window.submitAddSkill()">\uCD94\uAC00</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>`
