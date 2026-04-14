@@ -82,6 +82,7 @@ func (p *Process) Start(ctx context.Context) error {
 	}
 
 	args := []string{
+		"--continue",
 		"--channels", channelRef,
 		"--dangerously-skip-permissions",
 	}
@@ -137,6 +138,8 @@ func (p *Process) Start(ctx context.Context) error {
 	env = append(env, fmt.Sprintf("HARNESS_DATA_DIR=%s", botDataDir))
 
 	cmd.Env = env
+	// Per-bot working directory so --continue resumes the correct session
+	cmd.Dir = botDataDir
 	p.cmd = cmd
 
 	// Start in PTY — Claude Code requires a terminal to stay alive in interactive mode
