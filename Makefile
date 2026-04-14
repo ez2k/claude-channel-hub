@@ -4,7 +4,7 @@ build:
 	go build -o bin/claude-channel-hub ./cmd/bot
 
 run: build
-	./bin/claude-channel-hub -config configs/channels.yaml -data ./data
+	./bin/claude-channel-hub -config configs/channels.yaml
 
 dev:
 	air -c .air.toml || go run ./cmd/bot -config configs/channels.yaml -data ./data

@@ -1,32 +1,33 @@
-# 🚀 Claude Code에서 이어서 작업하기
+# Claude Channel Hub — 설치 & 설정 가이드
 
-## 1단계: 프로젝트 다운로드 & 압축 해제
+## 사전 요구사항
+
+- Go 1.22+
+- [Claude Code](https://claude.ai/code) — `claude` CLI (claude.ai 로그인 필요)
+- [Bun](https://bun.sh) — 채널 플러그인 실행용
+- tmux — 봇 프로세스 세션 관리용
+- Telegram 봇 토큰 ([BotFather](https://t.me/BotFather)에서 발급)
+
+## 1단계: 프로젝트 클론
 
 ```bash
-# 다운로드한 zip 파일 압축 해제
-unzip claude-channel-hub.zip
+git clone https://github.com/ez2k/claude-channel-hub.git
 cd claude-channel-hub
 ```
 
-## 2단계: Go 모듈 초기화
+## 2단계: 의존성 & 빌드
 
 ```bash
-# 모듈 이름을 본인 레포로 변경 (선택)
-# go.mod의 module 경로를 원하는 이름으로 수정
-# 예: github.com/myname/claude-channel-hub
-
-# 의존성 다운로드
+# Go 의존성
 go mod tidy
+
+# 바이너리 빌드
+go build -o bin/claude-channel-hub ./cmd/bot/
+# 또는:
+make build
 ```
 
-## 3단계: 빌드 확인
-
-```bash
-go build ./cmd/bot/
-# 에러 없으면 성공
-```
-
-## 4단계: 환경 설정
+## 3단계: 환경 설정
 
 ```bash
 cp .env.example .env
@@ -34,85 +35,145 @@ cp .env.example .env
 
 `.env` 파일 편집:
 ```env
-# CLI 모드면 이건 안 넣어도 됨
-# ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
-
-# 텔레그램 봇 토큰 (BotFather에서 발급)
-TELEGRAM_BOT_TOKEN=여기에_토큰
+TELEGRAM_BOT_TOKEN=여기에_봇_토큰
+# TELEGRAM_SECOND_BOT_TOKEN=두번째_봇_토큰  # 선택
 ```
 
-`configs/channels.yaml`에서 provider 모드 확인:
+> `ANTHROPIC_API_KEY`는 불필요합니다 — Claude Code는 claude.ai 구독 인증을 사용하며,
+> 하네스가 봇 프로세스 시작 시 자동으로 이 키를 환경에서 제거합니다.
+
+## 4단계: channels.yaml 설정
+
+`configs/channels.yaml` 편집:
+
 ```yaml
-defaults:
-  provider: cli    # 구독 사용 (API 키 불필요)
-  # provider: api  # API 키 필요
+admin:
+  addr: ":8082"
+
+bots:
+  - id: main-bot
+    type: telegram
+    name: "메인 봇"
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    plugin: telegram-enhanced
+    plugin_dir: ./plugins/telegram-enhanced
+
+channels:
+  - id: general
+    bot: main-bot
+    name: "일반 대화"
+    match:
+      type: default
+    data_dir: "./data/general"
 ```
 
-## 5단계: Claude Code에서 열기
+## 5단계: 플러그인 의존성 설치
 
 ```bash
-cd claude-channel-hub
-claude
+cd plugins/telegram-enhanced
+bun install
+cd ../..
 ```
 
-Claude Code가 `CLAUDE.md`를 자동으로 읽고 프로젝트 컨텍스트를 파악합니다.
+## 6단계: 실행
 
-## 6단계: 작업 시작
+### 직접 실행
 
-Claude Code에서 바로 쓸 수 있는 프롬프트 예시:
-
-### 기능 추가
-```
-Discord 채널을 구현해줘. internal/channel/discord.go에
-Channel 인터페이스를 구현하고 main.go에 연결해.
+```bash
+make run
+# → 봇 프로세스 시작 (tmux 세션: cch-{botId})
+# → 대시보드: http://localhost:8082
 ```
 
-### 버그 수정
-```
-internal/provider/cli.go에서 멀티턴 대화가 
-claude -p에 제대로 전달되는지 확인하고 개선해줘.
+### systemd 서비스로 실행
+
+```bash
+sudo bash install.sh
+
+# 서비스 시작
+sudo systemctl start claude-channel-hub
+sudo systemctl enable claude-channel-hub  # 부팅 시 자동 시작
+
+# 상태 확인
+sudo systemctl status claude-channel-hub
+journalctl -u claude-channel-hub -f
 ```
 
-### 테스트
-```
-go test -v ./cmd/bot/ 실행해서 모든 테스트 통과하는지 확인해줘.
+## 봇 프로세스 확인
+
+```bash
+# tmux 세션 목록 (봇별 세션: cch-{botId})
+tmux ls
+
+# 특정 봇 세션 연결 (대화형 확인)
+tmux attach -t cch-main-bot
+
+# 봇 로그 확인
+tail -f /tmp/claude-bot-main-bot.log
 ```
 
-### 스킬 추가
-```
-make add-skill NAME=git_helper DESC="Git 워크플로우 자동화"
-내용은 커밋 메시지 작성, PR 리뷰, 브랜치 전략을 도와주는 스킬로 작성해줘.
+## 대시보드
+
+`http://localhost:8082` 에서:
+
+- 봇 상태 확인 (running/stopped/failed)
+- 봇 추가/수정/삭제 (CRUD)
+- 봇 재시작
+- 접근 관리 (access.json — Telegram 페어링)
+- 메모리 뷰어
+- 로그 확인
+
+## 문제 해결
+
+### 봇이 시작되지 않는 경우
+
+```bash
+# 로그 확인
+tail -50 /tmp/claude-bot-{botId}.log
+
+# tmux 세션 직접 확인
+tmux attach -t cch-{botId}
 ```
 
-### 실행
+### Telegram 409 Conflict 오류
+
+동일 토큰으로 여러 프로세스가 폴링 중인 경우. 하네스가 자동으로 정리하지만
+수동으로 처리하려면:
+
+```bash
+# 기존 봇 프로세스 종료
+tmux kill-session -t cch-{botId}
+# bun 프로세스 확인
+ps aux | grep bun
 ```
-make run 으로 실행해보고, 텔레그램에서 테스트해줘.
+
+### 개발 채널 경고가 나타나는 경우
+
+하네스가 tmux send-keys Enter로 자동 응답합니다 (시작 후 2/4/6/8초).
+수동으로 확인하려면:
+
+```bash
+tmux attach -t cch-{botId}
+# Enter 키 입력 후 Ctrl-B D로 분리
+```
+
+## Claude Code 로그인 확인
+
+봇 프로세스는 시스템에 로그인된 Claude Code 인증을 사용합니다.
+인증이 만료되면 봇이 응답하지 않습니다:
+
+```bash
+claude  # 로그인 상태 확인
 ```
 
 ## 프로젝트 구조 빠른 참조
 
 ```
-중요한 파일만:
-
-configs/channels.yaml     ← 채널 설정 (여기서 provider 모드 변경)
-internal/provider/cli.go  ← CLI 모드 핵심 (claude -p 호출)
-internal/agent/agent.go   ← 에이전트 루프 핵심
-internal/channel/telegram.go ← 텔레그램 봇 전체 로직
-CLAUDE.md                 ← Claude Code가 읽는 프로젝트 컨텍스트
-```
-
-## 유용한 Claude Code 명령어
-
-```bash
-# 프로젝트 구조 파악
-claude "이 프로젝트의 아키텍처를 설명해줘"
-
-# 특정 파일 수정
-claude "internal/provider/cli.go에서 스트리밍 응답 지원 추가해줘"
-
-# 전체 빌드+테스트
-claude "go build ./cmd/bot/ && go test ./... 실행해줘"
-
-# Git 커밋
-claude "변경사항 확인하고 적절한 커밋 메시지로 커밋해줘"
+configs/channels.yaml             ← 봇/채널 설정
+internal/bot/process.go           ← tmux 세션 기반 프로세스 관리
+internal/supervisor/supervisor.go ← 봇 감시 + 자동 재시작
+internal/admin/server.go          ← 대시보드 + REST API
+plugins/telegram-enhanced/server.ts ← MCP 채널 플러그인 (단일 파일)
+CLAUDE.md                         ← Claude Code 프로젝트 컨텍스트
 ```
