@@ -73,10 +73,12 @@ type ClaudeConfig struct {
 }
 
 type DefaultsConfig struct {
-	Model          string `yaml:"model"`
-	SystemPrompt   string `yaml:"system_prompt"`
-	PermissionMode string `yaml:"permission_mode"`
-	PluginsDir     string `yaml:"plugins_dir"`
+	Model             string `yaml:"model"`
+	SystemPrompt      string `yaml:"system_prompt"`
+	PermissionMode    string `yaml:"permission_mode"`
+	PluginsDir        string `yaml:"plugins_dir"`
+	Plugin            string `yaml:"plugin"`
+	PluginMarketplace string `yaml:"plugin_marketplace"`
 }
 
 type BotConfig struct {
@@ -156,7 +158,13 @@ func Load(path string) (*Root, error) {
 		if root.Bots[i].Model == "" {
 			root.Bots[i].Model = root.Defaults.Model
 		}
-		if root.Bots[i].PluginDir == "" {
+		if root.Bots[i].Plugin == "" {
+			root.Bots[i].Plugin = root.Defaults.Plugin
+		}
+		if root.Bots[i].PluginMarketplace == "" {
+			root.Bots[i].PluginMarketplace = root.Defaults.PluginMarketplace
+		}
+		if root.Bots[i].PluginDir == "" && root.Defaults.PluginsDir != "" {
 			root.Bots[i].PluginDir = root.Defaults.PluginsDir + "/" + root.Bots[i].Plugin
 		}
 	}

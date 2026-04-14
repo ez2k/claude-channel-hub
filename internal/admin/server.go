@@ -69,6 +69,10 @@ func (s *Server) Start(ctx context.Context) error {
 	// Conversations (keep existing)
 	mux.HandleFunc("/api/conversations/", s.handleConversations)
 
+	// Memory viewer
+	mux.HandleFunc("/api/memory", s.handleMemory)
+	mux.HandleFunc("/api/memory/", s.handleMemoryAction)
+
 	// Dashboard
 	mux.HandleFunc("/", s.handleDashboard)
 
@@ -787,6 +791,94 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, conv)
 }
 
+// --- Memory API ---
+
+func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
+	dataDir := os.Getenv("HARNESS_DATA_DIR")
+	if dataDir == "" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".claude-channel-hub", "data")
+	}
+	memDir := filepath.Join(dataDir, "memory")
+
+	entries, err := os.ReadDir(memDir)
+	if err != nil {
+		writeJSON(w, map[string]interface{}{"users": []interface{}{}})
+		return
+	}
+
+	var users []map[string]interface{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		uid := e.Name()
+		memFile := filepath.Join(memDir, uid, "memories.json")
+		data, err := os.ReadFile(memFile)
+		if err != nil {
+			continue
+		}
+		var memories []interface{}
+		json.Unmarshal(data, &memories)
+		users = append(users, map[string]interface{}{
+			"user_id": uid,
+			"count":   len(memories),
+		})
+	}
+	writeJSON(w, map[string]interface{}{"users": users})
+}
+
+func (s *Server) handleMemoryAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/memory/")
+	parts := splitPath(strings.Trim(path, "/"))
+
+	dataDir := os.Getenv("HARNESS_DATA_DIR")
+	if dataDir == "" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".claude-channel-hub", "data")
+	}
+
+	if len(parts) < 1 {
+		http.Error(w, "missing user_id", 400)
+		return
+	}
+
+	uid := parts[0]
+	memFile := filepath.Join(dataDir, "memory", uid, "memories.json")
+
+	if r.Method == http.MethodGet {
+		data, err := os.ReadFile(memFile)
+		if err != nil {
+			writeJSON(w, map[string]interface{}{"user_id": uid, "memories": []interface{}{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(fmt.Sprintf(`{"user_id":"%s","memories":`, uid)))
+		w.Write(data)
+		w.Write([]byte("}"))
+		return
+	}
+
+	if r.Method == http.MethodDelete && len(parts) == 2 {
+		memID := parts[1]
+		data, _ := os.ReadFile(memFile)
+		var memories []map[string]interface{}
+		json.Unmarshal(data, &memories)
+		var filtered []map[string]interface{}
+		for _, m := range memories {
+			if fmt.Sprint(m["id"]) != memID {
+				filtered = append(filtered, m)
+			}
+		}
+		out, _ := json.MarshalIndent(filtered, "", "  ")
+		os.WriteFile(memFile, out, 0644)
+		writeJSON(w, map[string]string{"status": "deleted", "id": memID})
+		return
+	}
+
+	http.Error(w, "not found", 404)
+}
+
 // --- Dashboard ---
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -1212,7 +1304,10 @@ body {
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="section-title" style="margin:0">&#xBD07; &#xC0C1;&#xD0DC;</div>
-      <button onclick="showAddBotModal()" style="padding:6px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ &#xBD07; &#xCD94;&#xAC00;</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="showMemoryModal()" style="padding:6px 14px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">&#xBA54;&#xBAA8;&#xB9AC;</button>
+        <button onclick="showAddBotModal()" style="padding:6px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ &#xBD07; &#xCD94;&#xAC00;</button>
+      </div>
     </div>
     <div class="bot-grid" id="bot-grid">
       <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
@@ -1321,6 +1416,25 @@ body {
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
       <button onclick="closeAddBotModal()" style="padding:7px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#e6edf3;cursor:pointer;font-size:13px">&#xCDE8;&#xC18C;</button>
       <button onclick="submitAddBot()" style="padding:7px 16px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">&#xCD94;&#xAC00;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Memory Modal -->
+<div id="memoryModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:860px;width:95%;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="margin:0;font-size:16px">&#xBA54;&#xBAA8;&#xB9AC; &#xBDF0;&#xC5B4;</h3>
+      <button onclick="closeMemoryModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
+    </div>
+    <div style="display:flex;gap:16px;flex:1;min-height:0;overflow:hidden">
+      <div style="width:200px;flex-shrink:0;border:1px solid #21262d;border-radius:8px;overflow-y:auto;background:#0d1117">
+        <div style="padding:8px 10px;font-size:11px;color:#8b949e;border-bottom:1px solid #21262d;font-weight:600">&#xC0AC;&#xC6A9;&#xC790;</div>
+        <div id="memory-user-list" style="padding:4px 0"></div>
+      </div>
+      <div style="flex:1;border:1px solid #21262d;border-radius:8px;overflow-y:auto;background:#0d1117;padding:12px">
+        <div id="memory-list" style="font-size:13px;color:#8b949e">&#xC0AC;&#xC6A9;&#xC790;&#xB97C; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -2105,6 +2219,66 @@ window.deleteBot = function(id) {
       }
     })
     .catch(function(e) { alert('\uC624\uB958: ' + e); });
+};
+
+// Memory Modal
+window.showMemoryModal = function() {
+  document.getElementById('memoryModal').style.display = 'flex';
+  loadMemoryUsers();
+};
+
+window.closeMemoryModal = function() {
+  document.getElementById('memoryModal').style.display = 'none';
+};
+
+document.getElementById('memoryModal').addEventListener('click', function(e) {
+  if (e.target === this) closeMemoryModal();
+});
+
+function loadMemoryUsers() {
+  fetch('/api/memory').then(function(r) { return r.json(); }).then(function(data) {
+    var users = data.users || [];
+    var el = document.getElementById('memory-user-list');
+    if (!users.length) {
+      el.innerHTML = '<div style="color:#8b949e;font-size:12px;padding:8px">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      return;
+    }
+    el.innerHTML = users.map(function(u) {
+      return '<div onclick="loadMemories(\'' + esc(u.user_id) + '\')" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #21262d;font-size:12px">'
+        + '<span style="font-family:monospace">' + esc(u.user_id) + '</span>'
+        + ' <span style="color:#8b949e">(' + u.count + '\uAC74)</span></div>';
+    }).join('');
+  });
+}
+
+window.loadMemories = function(uid) {
+  fetch('/api/memory/' + uid).then(function(r) { return r.json(); }).then(function(data) {
+    var el = document.getElementById('memory-list');
+    var memories = data.memories || [];
+    if (!memories.length) {
+      el.innerHTML = '<div style="color:#8b949e">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      return;
+    }
+    el.innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">\uC0AC\uC6A9\uC790: ' + esc(uid) + ' (' + memories.length + '\uAC74)</div>' +
+      memories.map(function(m) {
+        var typeColors = {preference:'#3fb950',context:'#58a6ff',correction:'#f85149',fact:'#d2a8ff',general:'#8b949e'};
+        var color = typeColors[m.type] || '#8b949e';
+        return '<div style="padding:8px;border:1px solid #21262d;border-radius:6px;margin-bottom:6px">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center">'
+          + '<span style="font-size:11px;color:' + color + ';font-weight:bold">' + esc(m.type || 'general') + '</span>'
+          + '<button onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="padding:1px 6px;background:#da3633;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:10px">\uC0AD\uC81C</button>'
+          + '</div>'
+          + '<div style="margin-top:4px;font-size:13px">' + esc(m.content) + '</div>'
+          + '<div style="margin-top:4px;font-size:10px;color:#8b949e">\uAC00\uC911\uCE58: ' + (m.weight||0).toFixed(1) + ' | \uC870\uD68C: ' + (m.accessCount||0) + '\uD68C | ' + (m.createdAt||'').slice(0,10) + '</div>'
+          + '</div>';
+      }).join('');
+  });
+};
+
+window.deleteMemory = function(uid, mid) {
+  if (!confirm('\uC774 \uBA54\uBAA8\uB9AC\uB97C \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  fetch('/api/memory/' + uid + '/' + mid, {method:'DELETE'})
+    .then(function() { loadMemories(uid); });
 };
 
 // Init and auto-refresh

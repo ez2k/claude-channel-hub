@@ -15,6 +15,8 @@ defaults:
     system_prompt: ""
     permission_mode: dangerously-skip
     plugins_dir: ./plugins
+    plugin: telegram-enhanced
+    plugin_marketplace: claude-channel-hub
 bots:
     - id: main-bot
       type: telegram
@@ -29,12 +31,12 @@ bots:
       system_prompt: ""
     - id: claude_bot
       type: telegram
-      name: ""
+      name: 클로드 봇
       enabled: true
       token: 8578383619:AAGSYUbFiPj5TGwVOwa1rpOvFyXO1scBZTU
-      plugin: telegram
+      plugin: telegram-enhanced
       plugin_dir: ""
-      plugin_marketplace: claude-plugins-official
+      plugin_marketplace: claude-channel-hub
       claude_version: ""
       model: ""
       system_prompt: ""
