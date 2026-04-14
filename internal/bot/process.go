@@ -78,6 +78,9 @@ func (p *Process) Start(ctx context.Context) error {
 	// Kill any existing tmux session with the same name
 	exec.Command("tmux", "kill-session", "-t", p.tmuxSession).Run()
 
+	// Kill stale bun processes using the same bot token (prevents 409 Conflict)
+	killStaleBotProcesses(p.bot.Config.Token)
+
 	// Build claude command args
 	args := []string{"--dangerously-skip-permissions"}
 
@@ -153,11 +156,10 @@ func (p *Process) Start(ctx context.Context) error {
 		os.Rename(logPath, logPath+".1")
 	}
 
-	shellCmd := fmt.Sprintf("%s; cd '%s'; %s 2>&1 | tee -a '%s'",
+	shellCmd := fmt.Sprintf("%s; cd '%s'; %s",
 		strings.Join(envExports, "; "),
 		botDataDir,
 		claudeCmd,
-		logPath,
 	)
 
 	// Create tmux session with the claude command
@@ -179,6 +181,9 @@ func (p *Process) Start(ctx context.Context) error {
 
 	p.state = StateRunning
 	p.startedAt = time.Now()
+
+	// Log tmux output to file via pipe-pane
+	exec.Command("tmux", "pipe-pane", "-t", p.tmuxSession, "-o", fmt.Sprintf("cat >> %s", logPath)).Run()
 
 	// Auto-dismiss startup prompts after delays
 	// Send Enter (CR) to confirm development channel warning
@@ -274,4 +279,44 @@ func (p *Process) Wait() {
 // SessionName returns the tmux session name for this bot.
 func (p *Process) SessionName() string {
 	return p.tmuxSession
+}
+
+// killStaleBotProcesses finds and kills bun/node processes that have the given
+// bot token in their environment. This prevents Telegram 409 Conflict errors
+// from multiple processes polling the same token.
+func killStaleBotProcesses(token string) {
+	if token == "" {
+		return
+	}
+	// Short token prefix for matching (first 10 chars)
+	prefix := token
+	if len(prefix) > 10 {
+		prefix = prefix[:10]
+	}
+	// Find bun/node processes
+	out, err := exec.Command("bash", "-c",
+		fmt.Sprintf("ps aux | grep -E 'bun.*server|node.*claude' | grep -v grep | awk '{print $2}'")).Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		// Check if this process has our token in its environment
+		envData, err := os.ReadFile(fmt.Sprintf("/proc/%s/environ", line))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(envData), prefix) {
+			var pid int
+			fmt.Sscanf(line, "%d", &pid)
+			if pid > 0 {
+				proc, err := os.FindProcess(pid)
+				if err == nil {
+					proc.Kill()
+				}
+			}
+		}
+	}
 }
