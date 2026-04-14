@@ -108,6 +108,11 @@ func (p *Process) Start(ctx context.Context) error {
 		serverName := fmt.Sprintf("server:%s", p.bot.Config.Plugin)
 		args = append(args, "--dangerously-load-development-channels", serverName)
 	}
+	// Load skills directory so Claude Code discovers SKILL.md files
+	skillsAbsDir, _ := filepath.Abs("skills")
+	if _, err := os.Stat(skillsAbsDir); err == nil {
+		args = append(args, "--add-dir", skillsAbsDir)
+	}
 	if p.bot.Config.Model != "" {
 		args = append(args, "--model", p.bot.Config.Model)
 	}
