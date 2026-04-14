@@ -205,6 +205,25 @@ func (s *Supervisor) healthCheck() {
 		if !e.bot.Process.IsAlive() && e.bot.Process.State() == bot.StateRunning {
 			log.Printf("💔 [%s] Process not alive but state=running, will be restarted by runBot", e.bot.Config.ID)
 			s.logEvent(e.bot.Config.ID, "health_fail", "process not alive")
+			continue
+		}
+
+		// Check if bot log file has been updated recently (indicates activity)
+		// If no activity for 10 minutes, the session is likely stale — restart
+		logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", e.bot.Config.ID)
+		if info, err := os.Stat(logPath); err == nil {
+			idle := time.Since(info.ModTime())
+			if idle > 10*time.Minute && e.bot.Process.IsAlive() {
+				log.Printf("⚠️  [%s] Session stale (no activity for %s), restarting", e.bot.Config.ID, idle.Truncate(time.Second))
+				s.logEvent(e.bot.Config.ID, "stale_restart", fmt.Sprintf("idle %s", idle.Truncate(time.Second)))
+				if e.bot.Process != nil {
+					e.bot.Process.Stop()
+				}
+				select {
+				case e.restartCh <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }

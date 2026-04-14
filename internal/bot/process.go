@@ -4,16 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 // ProcessState represents the lifecycle state of a bot process.
@@ -28,12 +24,11 @@ const (
 	StateFailed   ProcessState = "failed"
 )
 
-// Process wraps an os/exec.Cmd running in a PTY and tracks lifecycle state.
+// Process manages a Claude Code bot running inside a tmux session.
 type Process struct {
 	bot          *Bot
 	claudeBinary string
-	cmd          *exec.Cmd
-	ptmx         *os.File // PTY master
+	tmuxSession  string // tmux session name
 	state        ProcessState
 	startedAt    time.Time
 	mu           sync.RWMutex
@@ -45,7 +40,12 @@ func NewProcess(b *Bot, claudeBinary string) *Process {
 	if claudeBinary == "" {
 		claudeBinary = "claude"
 	}
-	return &Process{bot: b, claudeBinary: claudeBinary, state: StateIdle}
+	return &Process{
+		bot:          b,
+		claudeBinary: claudeBinary,
+		tmuxSession:  "cch-" + b.Config.ID, // cch = claude-channel-hub
+		state:        StateIdle,
+	}
 }
 
 // State returns the current process state.
@@ -62,7 +62,7 @@ func (p *Process) StartedAt() time.Time {
 	return p.startedAt
 }
 
-// Start launches `claude --channels ...` in a PTY so Claude Code sees a terminal.
+// Start launches Claude Code inside a tmux session.
 func (p *Process) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -72,30 +72,33 @@ func (p *Process) Start(ctx context.Context) error {
 	}
 	p.state = StateStarting
 
-	childCtx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 
+	// Kill any existing tmux session with the same name
+	exec.Command("tmux", "kill-session", "-t", p.tmuxSession).Run()
+
+	// Build claude command args
 	args := []string{"--dangerously-skip-permissions"}
 
-	// Resume previous session if one exists in the bot's working directory
-	h, _ := os.UserHomeDir()
-	sessDir := filepath.Join(h, ".claude-channel-hub", "data", p.bot.Config.ID, ".claude", "sessions")
+	// Resume previous session if one exists
+	home, _ := os.UserHomeDir()
+	botDataDir := filepath.Join(home, ".claude-channel-hub", "data", p.bot.Config.ID)
+	os.MkdirAll(botDataDir, 0755)
+
+	sessDir := filepath.Join(botDataDir, ".claude", "sessions")
 	if entries, err := os.ReadDir(sessDir); err == nil && len(entries) > 0 {
 		args = append(args, "--continue")
 	}
 
 	// Channel mode
 	if p.bot.Config.PluginMarketplace != "" {
-		// Official plugin: plugin:name@marketplace via --channels
 		channelRef := fmt.Sprintf("plugin:%s@%s", p.bot.Config.Plugin, p.bot.Config.PluginMarketplace)
 		args = append(args, "--channels", channelRef)
 	} else if p.bot.Config.PluginDir != "" {
-		// Development channel per docs: place .mcp.json in working directory,
-		// then --dangerously-load-development-channels server:name
 		pluginAbsDir, _ := filepath.Abs(p.bot.Config.PluginDir)
-		// Copy .mcp.json to bot's working directory so Claude Code reads it automatically
 		srcMcp := filepath.Join(pluginAbsDir, ".mcp.json")
-		dstMcp := filepath.Join(h, ".claude-channel-hub", "data", p.bot.Config.ID, ".mcp.json")
+		dstMcp := filepath.Join(botDataDir, ".mcp.json")
 		if data, err := os.ReadFile(srcMcp); err == nil {
 			os.WriteFile(dstMcp, data, 0644)
 		}
@@ -109,32 +112,25 @@ func (p *Process) Start(ctx context.Context) error {
 		args = append(args, "--append-system-prompt", p.bot.Config.SystemPrompt)
 	}
 
-	cmd := exec.CommandContext(childCtx, p.claudeBinary, args...)
+	// Build environment variables for tmux
+	var envExports []string
 
-	// Build environment — filter out ANTHROPIC_API_KEY to prevent
-	// Claude Code from prompting about API key usage (use subscription auth)
-	var env []string
-	for _, e := range os.Environ() {
-		if len(e) > 18 && e[:18] == "ANTHROPIC_API_KEY=" {
-			continue
-		}
-		env = append(env, e)
-	}
-	// Per-bot state directory for independent access control
-	home, _ := os.UserHomeDir()
+	// Filter ANTHROPIC_API_KEY
+	envExports = append(envExports, "unset ANTHROPIC_API_KEY")
+
+	// Bot-specific env vars
 	switch p.bot.Config.Type {
 	case "telegram":
-		env = append(env, fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s", p.bot.Config.Token))
+		envExports = append(envExports, fmt.Sprintf("export TELEGRAM_BOT_TOKEN='%s'", p.bot.Config.Token))
 		stateDir := filepath.Join(home, ".claude", "channels", "telegram-"+p.bot.Config.ID)
 		os.MkdirAll(stateDir, 0700)
-		env = append(env, fmt.Sprintf("TELEGRAM_STATE_DIR=%s", stateDir))
-		// Copy token .env if not exists
+		envExports = append(envExports, fmt.Sprintf("export TELEGRAM_STATE_DIR='%s'", stateDir))
 		envFile := filepath.Join(stateDir, ".env")
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
 			os.WriteFile(envFile, []byte(fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s\n", p.bot.Config.Token)), 0600)
 		}
 	case "discord":
-		env = append(env, fmt.Sprintf("DISCORD_BOT_TOKEN=%s", p.bot.Config.Token))
+		envExports = append(envExports, fmt.Sprintf("export DISCORD_BOT_TOKEN='%s'", p.bot.Config.Token))
 	}
 
 	channelsJSON, err := json.Marshal(p.bot.Channels)
@@ -143,121 +139,75 @@ func (p *Process) Start(ctx context.Context) error {
 		cancel()
 		return fmt.Errorf("marshal channels: %w", err)
 	}
-	env = append(env, fmt.Sprintf("HARNESS_CHANNELS_CONFIG=%s", string(channelsJSON)))
+	envExports = append(envExports, fmt.Sprintf("export HARNESS_CHANNELS_CONFIG='%s'", string(channelsJSON)))
+	envExports = append(envExports, fmt.Sprintf("export HARNESS_DATA_DIR='%s'", botDataDir))
+	envExports = append(envExports, "export DISABLE_OMC=1")
+	envExports = append(envExports, "export IS_SANDBOX=1")
 
-	// Per-bot data directory for memory/profile storage
-	botDataDir := filepath.Join(home, ".claude-channel-hub", "data", p.bot.Config.ID)
-	os.MkdirAll(botDataDir, 0755)
-	env = append(env, fmt.Sprintf("HARNESS_DATA_DIR=%s", botDataDir))
+	// Build the full command to run inside tmux
+	claudeCmd := fmt.Sprintf("%s %s", p.claudeBinary, strings.Join(args, " "))
+	// Chain: set env → cd to bot dir → run claude → log output
+	logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", p.bot.Config.ID)
+	// Rotate log if > 10MB
+	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
+		os.Rename(logPath, logPath+".1")
+	}
 
-	// Disable OMC hooks to prevent stop hooks from killing bot sessions
-	env = append(env, "DISABLE_OMC=1")
+	shellCmd := fmt.Sprintf("%s; cd '%s'; %s 2>&1 | tee -a '%s'",
+		strings.Join(envExports, "; "),
+		botDataDir,
+		claudeCmd,
+		logPath,
+	)
 
-	cmd.Env = env
-	// Per-bot working directory so --continue resumes the correct session
-	cmd.Dir = botDataDir
-	p.cmd = cmd
+	// Create tmux session with the claude command
+	tmuxArgs := []string{
+		"new-session",
+		"-d",                // detached
+		"-s", p.tmuxSession, // session name
+		"-x", "200",         // wide terminal
+		"-y", "50",          // tall terminal
+		"bash", "-c", shellCmd,
+	}
 
-	// Start in PTY — Claude Code requires a terminal to stay alive in interactive mode
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
+	cmd := exec.Command("tmux", tmuxArgs...)
+	if err := cmd.Run(); err != nil {
 		p.state = StateFailed
 		cancel()
-		return fmt.Errorf("start claude with pty: %w", err)
+		return fmt.Errorf("start tmux session: %w", err)
 	}
-	p.ptmx = ptmx
 
 	p.state = StateRunning
 	p.startedAt = time.Now()
 
-	// Auto-dismiss startup prompts (development channels warning, etc.)
-	// Send CR (Enter key in PTY) after delays to confirm any blocking prompts
+	// Auto-dismiss startup prompts after delays
+	// Send Enter (CR) to confirm development channel warning
 	go func() {
 		for _, d := range []int{2, 4, 6, 8} {
 			time.Sleep(time.Duration(d) * time.Second)
-			ptmx.Write([]byte("\r"))
+			exec.Command("tmux", "send-keys", "-t", p.tmuxSession, "Enter").Run()
 		}
 	}()
 
-	// Capture PTY output to log file for debugging
-	logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", p.bot.Config.ID)
-	// Rotate if > 10MB
-	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
-		os.Rename(logPath, logPath+".1")
-	}
-	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-
-	// Auto-answer prompts: monitor PTY output for known prompts and send responses
-	pr, pw := io.Pipe()
+	// Monitor tmux session — detect when it exits
 	go func() {
-		buf := make([]byte, 4096)
-		var recent []byte
 		for {
-			n, err := ptmx.Read(buf)
-			if n > 0 {
-				// Write to log file
-				if logFile != nil {
-					logFile.Write(buf[:n])
+			time.Sleep(5 * time.Second)
+			if !p.isTmuxAlive() {
+				p.mu.Lock()
+				if p.state == StateRunning {
+					p.state = StateFailed
 				}
-				// Write to pipe for downstream consumers
-				pw.Write(buf[:n])
-				// Check recent output for prompts
-				recent = append(recent, buf[:n]...)
-				if len(recent) > 8192 {
-					recent = recent[len(recent)-8192:]
-				}
-				text := string(recent)
-				// Auto-answer known prompts
-				if containsPrompt(text, "Do you want to use this API key") {
-					ptmx.Write([]byte("2\r")) // No
-					recent = nil
-				} else if containsPrompt(text, "local development") ||
-					containsPrompt(text, "Loading development channels") {
-					ptmx.Write([]byte("\r")) // Confirm (Enter)
-					recent = nil
-				} else if containsPrompt(text, "Trust this workspace") ||
-					containsPrompt(text, "trust this project") {
-					ptmx.Write([]byte("y\r"))
-					recent = nil
-				} else if containsPrompt(text, "Enter to confirm") {
-					ptmx.Write([]byte("\n"))
-					recent = nil
-				}
-			}
-			if err != nil {
-				pw.Close()
-				if logFile != nil {
-					logFile.Close()
-				}
+				p.mu.Unlock()
 				return
 			}
-		}
-	}()
-
-	// Drain pipe to avoid blocking
-	go func() {
-		io.Copy(io.Discard, pr)
-	}()
-
-	// Transition state when process exits
-	go func() {
-		err := cmd.Wait()
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.ptmx != nil {
-			p.ptmx.Close()
-		}
-		if err != nil && p.state == StateRunning {
-			p.state = StateFailed
-		} else if p.state != StateStopping {
-			p.state = StateStopped
 		}
 	}()
 
 	return nil
 }
 
-// Stop gracefully stops the claude process.
+// Stop gracefully stops the tmux session.
 func (p *Process) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -267,27 +217,12 @@ func (p *Process) Stop() error {
 	}
 	p.state = StateStopping
 
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(os.Interrupt)
+	// Send Ctrl-C to claude process, then kill session
+	exec.Command("tmux", "send-keys", "-t", p.tmuxSession, "C-c", "").Run()
+	time.Sleep(2 * time.Second)
 
-		done := make(chan struct{})
-		go func() {
-			if p.cmd.ProcessState == nil {
-				_, _ = p.cmd.Process.Wait()
-			}
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = p.cmd.Process.Kill()
-		}
-	}
-
-	if p.ptmx != nil {
-		p.ptmx.Close()
-	}
+	// Kill the tmux session
+	exec.Command("tmux", "kill-session", "-t", p.tmuxSession).Run()
 
 	if p.cancel != nil {
 		p.cancel()
@@ -297,47 +232,46 @@ func (p *Process) Stop() error {
 	return nil
 }
 
-// IsAlive reports whether the process is currently running.
+// IsAlive reports whether the tmux session is running.
 func (p *Process) IsAlive() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.cmd == nil || p.cmd.Process == nil {
-		return false
-	}
-	return p.state == StateRunning
+	return p.state == StateRunning && p.isTmuxAlive()
 }
 
-// PID returns the OS process ID (0 if not started).
+// isTmuxAlive checks if the tmux session exists (must be called without holding the lock, or from within a lock).
+func (p *Process) isTmuxAlive() bool {
+	err := exec.Command("tmux", "has-session", "-t", p.tmuxSession).Run()
+	return err == nil
+}
+
+// PID returns the PID of the first process in the tmux session (0 if not running).
 func (p *Process) PID() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.cmd == nil || p.cmd.Process == nil {
+	out, err := exec.Command("tmux", "list-panes", "-t", p.tmuxSession, "-F", "#{pane_pid}").Output()
+	if err != nil {
 		return 0
 	}
-	return p.cmd.Process.Pid
+	var pid int
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &pid)
+	return pid
 }
 
-// Wait blocks until the process exits.
+// Wait blocks until the tmux session exits.
 func (p *Process) Wait() {
-	if p.cmd == nil {
-		return
-	}
-	_ = p.cmd.Wait()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.state != StateStopping {
-		p.state = StateStopped
+	for {
+		time.Sleep(3 * time.Second)
+		if !p.isTmuxAlive() {
+			p.mu.Lock()
+			if p.state != StateStopping {
+				p.state = StateStopped
+			}
+			p.mu.Unlock()
+			return
+		}
 	}
 }
 
-// Output returns the PTY master for reading process output.
-func (p *Process) Output() *os.File { return p.ptmx }
-
-// ansiStripRe strips ANSI escape sequences for prompt matching.
-var ansiStripRe = regexp.MustCompile(`\x1b[^a-zA-Z~]*[a-zA-Z~]`)
-
-// containsPrompt checks if text contains a prompt string (case-insensitive, ANSI stripped).
-func containsPrompt(text, prompt string) bool {
-	clean := ansiStripRe.ReplaceAllString(text, "")
-	return strings.Contains(strings.ToLower(clean), strings.ToLower(prompt))
+// SessionName returns the tmux session name for this bot.
+func (p *Process) SessionName() string {
+	return p.tmuxSession
 }
