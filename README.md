@@ -1,5 +1,7 @@
 # Claude Channel Hub
 
+[English](README.en.md) | [中文](README.zh.md) | **한국어**
+
 Claude Code의 공식 [Channels](https://code.claude.com/docs/ko/channels) 기능을 활용하는 멀티채널 봇 오케스트레이터.
 Telegram 등 여러 봇을 동시에 관리하고, 각 봇의 Claude Code 프로세스를 자동 감시/복구합니다.
 
