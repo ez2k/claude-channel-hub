@@ -199,6 +199,16 @@ try {
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const STATIC = process.env.TELEGRAM_ACCESS_MODE === 'static'
 
+// Track active typing indicators per chat — cleared when reply is sent
+const activeTyping = new Map<string, ReturnType<typeof setInterval>>()
+function stopTyping(chatId: string) {
+  const interval = activeTyping.get(chatId)
+  if (interval) {
+    clearInterval(interval)
+    activeTyping.delete(chatId)
+  }
+}
+
 if (!TOKEN) {
   process.stderr.write(
     `telegram channel: TELEGRAM_BOT_TOKEN required\n` +
@@ -700,6 +710,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     switch (req.params.name) {
       case 'reply': {
         const chat_id = args.chat_id as string
+        stopTyping(chat_id)
         const text = args.text as string
         const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined
         const files = (args.files as string[] | undefined) ?? []
@@ -1153,8 +1164,14 @@ async function handleInbound(
     return
   }
 
-  // Typing indicator — signals "processing" until we reply (or ~5s elapses).
-  void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+  // Typing indicator — repeat every 4s until reply is sent (Telegram expires after ~5s)
+  const typingKey = chat_id
+  if (!activeTyping.has(typingKey)) {
+    activeTyping.set(typingKey, setInterval(() => {
+      bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+    }, 4000))
+    void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+  }
 
   // Ack reaction — lets the user know we're processing. Fire-and-forget.
   // Telegram only accepts a fixed emoji whitelist — if the user configures
