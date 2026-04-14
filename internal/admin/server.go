@@ -914,7 +914,10 @@ const dashboardHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Channel Hub &#x2014; &#xB300;&#xC2DC;&#xBCF4;&#xB4DC;</title>
+<title>Claude Channel Hub</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -935,11 +938,13 @@ const dashboardHTML = `<!DOCTYPE html>
   --red-bg:    rgba(248,81,73,.12);
   --blue:      #58a6ff;
   --blue-bg:   rgba(88,166,255,.12);
+  --purple:    #d2a8ff;
   --radius:    8px;
+  --sidebar-w: 200px;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+  font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -947,97 +952,147 @@ body {
   line-height: 1.5;
 }
 
+code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-chip, .version-tag, .version-meta, .log-pre, .modal-log {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ===== Header ===== */
 .header {
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--surface) 0%, #1a2233 100%);
   border-bottom: 1px solid var(--border);
   padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 52px;
   position: sticky;
   top: 0;
   z-index: 100;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
-.header-title { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
-.header-right { display: flex; align-items: center; gap: 12px; }
-.refresh-info { font-size: 12px; color: var(--text3); }
+.header-title { font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
+.header-right { display: flex; align-items: center; gap: 14px; }
+.refresh-info { font-size: 11px; color: var(--text3); }
 #last-updated { color: var(--text2); }
+.mobile-menu-btn { display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 4px 8px; border-radius: 5px; cursor: pointer; font-size: 16px; }
 
 .health-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600;
-  padding: 4px 12px; border-radius: 20px; border: 1px solid;
+  font-size: 11px; font-weight: 600;
+  padding: 3px 10px; border-radius: 20px; border: 1px solid;
 }
 .health-badge.healthy  { color: var(--green);  background: var(--green-bg);  border-color: rgba(63,185,80,.3); }
 .health-badge.degraded { color: var(--yellow); background: var(--yellow-bg); border-color: rgba(210,153,34,.3); }
 .health-badge.down     { color: var(--red);    background: var(--red-bg);    border-color: rgba(248,81,73,.3); }
-.health-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.health-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .health-badge.healthy .dot { animation: pulse 2s infinite; }
 
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-.tabs {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 0 24px;
+/* ===== Layout ===== */
+.app-layout {
   display: flex;
+  min-height: calc(100vh - 52px);
 }
-.tab {
-  padding: 12px 18px; cursor: pointer; color: var(--text2);
-  border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500;
-  transition: color .15s, border-color .15s; user-select: none;
-}
-.tab:hover  { color: var(--text); }
-.tab.active { color: var(--text); border-bottom-color: var(--blue); }
 
-.container { max-width: 1140px; margin: 0 auto; padding: 28px 24px; }
+/* ===== Sidebar ===== */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 52px;
+  height: calc(100vh - 52px);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.sidebar-section {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  padding: 16px 16px 6px;
+}
+.sidebar-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--text2);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.sidebar-item:hover { background: var(--surface2); color: var(--text); }
+.sidebar-item.active { color: var(--text); border-left-color: var(--blue); background: var(--surface2); }
+.sidebar-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
+
+/* ===== Content ===== */
+.content {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 28px;
+  max-width: 1100px;
+}
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
 
+/* ===== Summary Cards ===== */
 .summary-row {
   display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: 12px; margin-bottom: 28px;
+  gap: 12px; margin-bottom: 24px;
 }
 .summary-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 16px 20px;
-  display: flex; flex-direction: column; gap: 4px;
+  border-radius: var(--radius); padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 3px;
 }
-.summary-card .s-val { font-size: 28px; font-weight: 700; line-height: 1; }
-.summary-card .s-lbl { font-size: 12px; color: var(--text2); font-weight: 500; }
+.summary-card .s-val { font-size: 26px; font-weight: 700; line-height: 1; font-family: 'JetBrains Mono', monospace; }
+.summary-card .s-lbl { font-size: 11px; color: var(--text2); font-weight: 500; }
 .summary-card.green  .s-val { color: var(--green); }
 .summary-card.yellow .s-val { color: var(--yellow); }
 .summary-card.red    .s-val { color: var(--red); }
 .summary-card.blue   .s-val { color: var(--blue); }
 
 .section-title {
-  font-size: 11px; font-weight: 700; color: var(--text3);
+  font-size: 10px; font-weight: 700; color: var(--text3);
   text-transform: uppercase; letter-spacing: .8px; margin: 0 0 12px;
 }
+.section-bar {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+}
 
+/* ===== Bot Grid ===== */
 .bot-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(340px,1fr));
   gap: 14px;
 }
 .bot-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden; transition: border-color .15s;
+  border-radius: var(--radius); overflow: visible; transition: border-color .15s;
 }
 .bot-card:hover { border-color: #444c56; }
 .bot-card-header {
   padding: 14px 16px; display: flex; align-items: flex-start;
   justify-content: space-between; border-bottom: 1px solid var(--border2);
 }
-.bot-name-row { display: flex; flex-direction: column; gap: 3px; }
-.bot-name { font-size: 15px; font-weight: 600; }
-.bot-id   { font-size: 11px; color: var(--text3); font-family: monospace; }
+.bot-name-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bot-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bot-username { font-size: 12px; color: var(--blue); font-weight: 500; }
+.bot-id { font-size: 11px; color: var(--text3); }
+.bot-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 .state-badge {
   font-size: 11px; font-weight: 600;
   padding: 3px 9px; border-radius: 20px; border: 1px solid;
-  white-space: nowrap; flex-shrink: 0;
+  white-space: nowrap;
 }
 .state-badge.running { color: var(--green);  background: var(--green-bg);  border-color: rgba(63,185,80,.3); }
 .state-badge.failed  { color: var(--red);    background: var(--red-bg);    border-color: rgba(248,81,73,.3); }
@@ -1053,19 +1108,20 @@ body {
   border-right: 1px solid var(--border2);
 }
 .bot-metric:last-child { border-right: none; }
-.bot-metric .m-val { font-size: 18px; font-weight: 700; }
+.bot-metric .m-val { font-size: 17px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 .bot-metric .m-lbl { font-size: 10px; color: var(--text2); margin-top: 1px; }
 
 .bot-footer {
   padding: 10px 16px; display: flex;
-  align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  align-items: center; justify-content: space-between; gap: 8px;
 }
-.bot-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.bot-footer-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
 
 .btn {
   font-size: 11px; font-weight: 600; padding: 4px 10px;
   border-radius: 5px; border: 1px solid; cursor: pointer;
   transition: opacity .15s; background: transparent;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
 }
 .btn:hover { opacity: .75; }
 .btn-restart  { color: var(--yellow); border-color: rgba(210,153,34,.4); }
@@ -1073,20 +1129,73 @@ body {
 .btn-status   { color: var(--green);  border-color: rgba(63,185,80,.4); }
 .btn-activate { color: var(--blue);   border-color: rgba(88,166,255,.4); }
 .btn-sm { font-size: 11px; padding: 3px 8px; }
+.btn-add {
+  padding: 5px 14px; background: #238636; border: none; border-radius: 6px;
+  color: #fff; cursor: pointer; font-size: 12px; font-weight: 600;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+.btn-add:hover { opacity: .85; }
+.btn-primary {
+  background: var(--blue); color: #fff; border: none;
+  padding: 7px 14px; border-radius: 5px; font-size: 13px;
+  font-weight: 600; cursor: pointer;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+.btn-primary:hover { opacity: .85; }
 
 .bot-type {
   font-size: 11px; padding: 2px 8px; border-radius: 4px;
   background: var(--surface2); color: var(--text2);
-  border: 1px solid var(--border); font-family: monospace;
+  border: 1px solid var(--border);
 }
+.bot-claude-ver {
+  font-size: 10px; color: var(--text3); white-space: nowrap;
+}
+.bot-claude-ver .update-hint { color: var(--yellow); font-weight: 600; }
 
 .channel-list { padding: 0 16px 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .ch-chip {
   font-size: 11px; padding: 2px 8px; border-radius: 4px;
   background: var(--blue-bg); color: var(--blue);
-  border: 1px solid rgba(88,166,255,.2); font-family: monospace;
+  border: 1px solid rgba(88,166,255,.2);
 }
 
+/* ===== Dropdown Menu ===== */
+.dropdown { position: relative; display: inline-block; }
+.dropdown-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); padding: 4px 8px; border-radius: 5px;
+  cursor: pointer; font-size: 14px; line-height: 1;
+  transition: all .15s;
+}
+.dropdown-btn:hover { color: var(--text); border-color: #444c56; }
+.dropdown-menu {
+  display: none; position: absolute; right: 0; top: 100%;
+  margin-top: 4px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; min-width: 150px; z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4); overflow: hidden;
+}
+.dropdown-menu.open { display: block; }
+.dropdown-item {
+  padding: 8px 14px; font-size: 12px; color: var(--text);
+  cursor: pointer; border-bottom: 1px solid var(--border2);
+  transition: background .1s;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+.dropdown-item:last-child { border-bottom: none; }
+.dropdown-item:hover { background: var(--surface2); }
+.dropdown-item.danger { color: var(--red); }
+.dropdown-item.danger:hover { background: var(--red-bg); }
+
+/* ===== Events ===== */
+.events-filter-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.filter-select {
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); padding: 5px 10px; border-radius: 5px; font-size: 12px;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
 .events-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
@@ -1095,7 +1204,7 @@ body {
 .events-table th {
   text-align: left; padding: 10px 14px; color: var(--text2);
   border-bottom: 1px solid var(--border); font-weight: 600;
-  font-size: 12px; background: var(--surface2);
+  font-size: 11px; background: var(--surface2); text-transform: uppercase; letter-spacing: .5px;
 }
 .events-table td {
   padding: 8px 14px; border-bottom: 1px solid var(--border2);
@@ -1103,8 +1212,8 @@ body {
 }
 .events-table tr:last-child td { border-bottom: none; }
 .events-table tr:hover td { background: var(--surface2); }
-.time-cell { color: var(--text3); white-space: nowrap; font-size: 12px; font-family: monospace; }
-.id-cell   { color: var(--text2); font-family: monospace; font-size: 12px; }
+.time-cell { color: var(--text3); white-space: nowrap; font-size: 12px; }
+.id-cell   { color: var(--text2); font-size: 12px; }
 
 .ev-tag {
   display: inline-block; font-size: 11px; font-weight: 600;
@@ -1120,7 +1229,7 @@ body {
 
 .empty-state { padding: 48px; text-align: center; color: var(--text3); font-size: 13px; }
 
-/* Versions tab */
+/* ===== Versions ===== */
 .versions-grid {
   display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr));
   gap: 12px; margin-bottom: 20px;
@@ -1131,11 +1240,11 @@ body {
 }
 .version-card.active-ver { border-color: rgba(63,185,80,.5); }
 .version-tag {
-  font-family: monospace; font-size: 14px; font-weight: 700;
+  font-size: 14px; font-weight: 700;
   display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
 }
 .active-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-.version-meta { font-size: 12px; color: var(--text3); margin-bottom: 10px; font-family: monospace; word-break: break-all; }
+.version-meta { font-size: 12px; color: var(--text3); margin-bottom: 10px; word-break: break-all; }
 
 .install-form {
   background: var(--surface); border: 1px solid var(--border);
@@ -1148,16 +1257,11 @@ body {
   background: var(--bg); border: 1px solid var(--border);
   color: var(--text); padding: 6px 10px; border-radius: 5px;
   font-size: 13px; width: 180px;
+  font-family: 'JetBrains Mono', monospace;
 }
 .form-input:focus { outline: none; border-color: var(--blue); }
-.btn-primary {
-  background: var(--blue); color: #fff; border: none;
-  padding: 7px 14px; border-radius: 5px; font-size: 13px;
-  font-weight: 600; cursor: pointer;
-}
-.btn-primary:hover { opacity: .85; }
 
-/* Config tab */
+/* ===== Config ===== */
 .config-section {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
@@ -1174,17 +1278,18 @@ body {
 .config-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .config-table td { padding: 8px 16px; border-bottom: 1px solid var(--border2); }
 .config-table tr:last-child td { border-bottom: none; }
-.config-key { color: var(--text2); width: 40%; font-family: monospace; font-size: 12px; }
-.config-val { font-family: monospace; font-size: 12px; word-break: break-all; }
+.config-key { color: var(--text2); width: 40%; font-size: 12px; }
+.config-val { font-size: 12px; word-break: break-all; }
 .config-val.masked { color: var(--text3); }
 
-/* Troubleshoot tab */
+/* ===== Troubleshoot ===== */
 .ts-select-row {
   display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
 }
 .ts-select {
   background: var(--surface); border: 1px solid var(--border);
   color: var(--text); padding: 7px 12px; border-radius: 5px; font-size: 13px;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
 }
 .ts-auto-label {
   font-size: 12px; color: var(--text2);
@@ -1201,8 +1306,18 @@ body {
   font-size: 12px; font-weight: 600; color: var(--text2);
 }
 .ts-card-body { padding: 14px; }
+.ts-overall {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+}
+.ts-overall-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 12px;
+}
+.ts-overall-item { text-align: center; }
+.ts-overall-val { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.ts-overall-lbl { font-size: 11px; color: var(--text2); }
 .log-pre {
-  font-family: monospace; font-size: 11px; color: var(--text2);
+  font-size: 11px; color: var(--text2);
   white-space: pre-wrap; word-break: break-all;
   max-height: 300px; overflow-y: auto;
   background: var(--bg); padding: 10px; border-radius: 5px;
@@ -1213,7 +1328,7 @@ body {
 .conn-dot.ok  { background: var(--green); }
 .conn-dot.err { background: var(--red); }
 
-/* Modal */
+/* ===== Unified Modal ===== */
 .modal-overlay {
   display: none; position: fixed; inset: 0;
   background: rgba(0,0,0,.65); z-index: 200;
@@ -1222,32 +1337,88 @@ body {
 .modal-overlay.open { display: flex; }
 .modal {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); width: 90vw; max-width: 860px;
+  border-radius: 10px; width: 90vw; max-width: 800px;
   max-height: 85vh; display: flex; flex-direction: column;
 }
+.modal.modal-wide { max-width: 860px; }
+.modal.modal-narrow { max-width: 520px; }
 .modal-header {
   padding: 14px 18px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
 }
-.modal-title { font-size: 14px; font-weight: 600; }
+.modal-title { font-size: 15px; font-weight: 600; }
 .modal-close {
   background: none; border: none; color: var(--text2);
   font-size: 18px; cursor: pointer; padding: 2px 6px;
 }
 .modal-close:hover { color: var(--text); }
 .modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+.modal-footer {
+  padding: 12px 18px; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 10px;
+}
 .modal-log {
-  font-family: monospace; font-size: 12px; color: var(--text2);
+  font-size: 12px; color: var(--text2);
   white-space: pre-wrap; word-break: break-all;
   background: var(--bg); padding: 12px; border-radius: 5px;
   border: 1px solid var(--border2); min-height: 200px;
 }
 
-@media (max-width: 700px) {
+/* ===== Access Modal Internals ===== */
+.access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.access-panel { background: var(--bg); border: 1px solid var(--border2); border-radius: 8px; padding: 12px; }
+.access-panel h4 { margin: 0 0 8px; font-size: 13px; }
+.access-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border2); }
+.access-add-row { display: flex; gap: 8px; margin-top: 8px; }
+.access-input { flex: 1; padding: 5px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; }
+.access-btn-add { padding: 4px 10px; background: #238636; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; }
+.access-btn-del { padding: 2px 6px; background: #da3633; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
+.access-policy-row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+.access-policy-select { padding: 4px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; }
+.pending-panel { background: var(--bg); border: 1px solid #f0883e; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.pending-panel h4 { margin: 0 0 8px; font-size: 13px; color: #f0883e; }
+.pending-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border2); }
+.pending-btn-approve { padding: 2px 8px; background: #238636; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
+.pending-btn-deny { padding: 2px 8px; background: #da3633; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
+
+/* ===== Memory Modal Internals ===== */
+.memory-layout { display: flex; gap: 16px; flex: 1; min-height: 0; overflow: hidden; }
+.memory-sidebar { width: 200px; flex-shrink: 0; border: 1px solid var(--border2); border-radius: 8px; overflow-y: auto; background: var(--bg); }
+.memory-sidebar-header { padding: 8px 10px; font-size: 11px; color: var(--text2); border-bottom: 1px solid var(--border2); font-weight: 600; }
+.memory-sidebar-item { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid var(--border2); font-size: 12px; transition: background .1s; }
+.memory-sidebar-item:hover { background: var(--surface2); }
+.memory-content { flex: 1; border: 1px solid var(--border2); border-radius: 8px; overflow-y: auto; background: var(--bg); padding: 12px; }
+.memory-item { padding: 8px; border: 1px solid var(--border2); border-radius: 6px; margin-bottom: 6px; }
+.memory-item-header { display: flex; justify-content: space-between; align-items: center; }
+.memory-item-meta { margin-top: 4px; font-size: 10px; color: var(--text2); }
+
+/* ===== Add Bot Form ===== */
+.add-bot-form { display: flex; flex-direction: column; gap: 14px; }
+.add-bot-label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.add-bot-label .req { color: var(--red); }
+.add-bot-input {
+  width: 100%; padding: 7px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text); font-size: 13px;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+.add-bot-textarea {
+  width: 100%; padding: 7px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text); font-size: 13px; resize: vertical;
+  font-family: 'Pretendard Variable', 'Pretendard', sans-serif;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .sidebar { display: none; position: fixed; top: 52px; left: 0; bottom: 0; z-index: 90; width: 220px; }
+  .sidebar.mobile-open { display: flex; }
+  .mobile-menu-btn { display: block; }
+  .content { padding: 16px; }
   .summary-row { grid-template-columns: repeat(2,1fr); }
-  .bot-grid    { grid-template-columns: 1fr; }
-  .container   { padding: 16px; }
-  .ts-grid     { grid-template-columns: 1fr; }
+  .bot-grid { grid-template-columns: 1fr; }
+  .ts-grid { grid-template-columns: 1fr; }
+  .access-grid { grid-template-columns: 1fr; }
+  .memory-layout { flex-direction: column; }
+  .memory-sidebar { width: 100%; max-height: 150px; }
 }
 </style>
 </head>
@@ -1255,230 +1426,136 @@ body {
 
 <header class="header">
   <div class="header-left">
-    <div class="header-title">&#x1F916; Claude Channel Hub</div>
+    <button class="mobile-menu-btn" onclick="toggleMobileSidebar()">&#x2630;</button>
+    <div class="header-title">Claude Channel Hub</div>
   </div>
   <div class="header-right">
-    <span class="refresh-info">&#xB9C8;&#xC9C0;&#xB9C9; &#xAC31;&#xC2E0;: <span id="last-updated">&#x2014;</span></span>
+    <span class="refresh-info"><span id="last-updated">&#x2014;</span></span>
     <span class="health-badge healthy" id="health-badge">
       <span class="dot"></span><span id="health-text">&#xC815;&#xC0C1;</span>
     </span>
   </div>
 </header>
 
-<nav class="tabs">
-  <div class="tab active" data-tab="bots">&#xBD07; &#xBAA9;&#xB85D;</div>
-  <div class="tab" data-tab="events">&#xC774;&#xBCA4;&#xD2B8; &#xB85C;&#xADF8;</div>
-  <div class="tab" data-tab="versions">&#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
-  <div class="tab" data-tab="config">&#xC124;&#xC815;</div>
-  <div class="tab" data-tab="troubleshoot">&#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
-</nav>
+<div class="app-layout">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-section">&#xAD00;&#xB9AC;</div>
+    <div class="sidebar-item active" data-tab="bots"><span class="sidebar-icon">&#x2B24;</span> &#xBD07; &#xBAA9;&#xB85D;</div>
+    <div class="sidebar-item" data-tab="events"><span class="sidebar-icon">&#x25F7;</span> &#xC774;&#xBCA4;&#xD2B8;</div>
+    <div class="sidebar-item" data-tab="versions"><span class="sidebar-icon">&#x2B06;</span> &#xBC84;&#xC804; &#xAD00;&#xB9AC;</div>
+    <div class="sidebar-section">&#xC2DC;&#xC2A4;&#xD15C;</div>
+    <div class="sidebar-item" data-tab="config"><span class="sidebar-icon">&#x2699;</span> &#xC124;&#xC815;</div>
+    <div class="sidebar-item" data-tab="troubleshoot"><span class="sidebar-icon">&#x26A0;</span> &#xD2B8;&#xB7EC;&#xBE14;&#xC288;&#xD305;</div>
+  </nav>
 
-<main class="container">
+  <main class="content">
 
-  <!-- Bots tab -->
-  <div class="tab-pane active" id="pane-bots">
-    <div class="summary-row">
-      <div class="summary-card blue">
-        <div class="s-val" id="sum-total">&#x2014;</div>
-        <div class="s-lbl">&#xC804;&#xCCB4; &#xBD07;</div>
+    <!-- Bots tab -->
+    <div class="tab-pane active" id="pane-bots">
+      <div class="summary-row">
+        <div class="summary-card blue">
+          <div class="s-val" id="sum-total">&#x2014;</div>
+          <div class="s-lbl">&#xC804;&#xCCB4; &#xBD07;</div>
+        </div>
+        <div class="summary-card green">
+          <div class="s-val" id="sum-running">&#x2014;</div>
+          <div class="s-lbl">&#xC2E4;&#xD589; &#xC911;</div>
+        </div>
+        <div class="summary-card red">
+          <div class="s-val" id="sum-failed">&#x2014;</div>
+          <div class="s-lbl">&#xC624;&#xB958;</div>
+        </div>
+        <div class="summary-card yellow">
+          <div class="s-val" id="sum-channels">&#x2014;</div>
+          <div class="s-lbl">&#xC804;&#xCCB4; &#xCC44;&#xB110;</div>
+        </div>
       </div>
-      <div class="summary-card green">
-        <div class="s-val" id="sum-running">&#x2014;</div>
-        <div class="s-lbl">&#xC2E4;&#xD589; &#xC911;</div>
+      <div class="section-bar">
+        <div class="section-title" style="margin:0">&#xBD07; &#xC0C1;&#xD0DC;</div>
+        <button class="btn-add" onclick="showAddBotModal()">+ &#xBD07; &#xCD94;&#xAC00;</button>
       </div>
-      <div class="summary-card red">
-        <div class="s-val" id="sum-failed">&#x2014;</div>
-        <div class="s-lbl">&#xC624;&#xB958;</div>
-      </div>
-      <div class="summary-card yellow">
-        <div class="s-val" id="sum-channels">&#x2014;</div>
-        <div class="s-lbl">&#xC804;&#xCCB4; &#xCC44;&#xB110;</div>
+      <div class="bot-grid" id="bot-grid">
+        <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
       </div>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="section-title" style="margin:0">&#xBD07; &#xC0C1;&#xD0DC;</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button onclick="showAddBotModal()" style="padding:6px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ &#xBD07; &#xCD94;&#xAC00;</button>
-      </div>
-    </div>
-    <div class="bot-grid" id="bot-grid">
-      <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
-    </div>
-  </div>
 
-  <!-- Events tab -->
-  <div class="tab-pane" id="pane-events">
-    <div class="section-title">&#xCD5C;&#xADFC; &#xC774;&#xBCA4;&#xD2B8; (&#xCD5C;&#xB300; 50&#xAC1C;)</div>
-    <div class="events-card">
-      <table class="events-table">
-        <thead>
-          <tr>
-            <th style="width:90px">&#xC2DC;&#xAC04;</th>
-            <th style="width:110px">&#xACBD;&#xACFC;</th>
-            <th style="width:160px">&#xBD07; / &#xCC44;&#xB110;</th>
-            <th style="width:130px">&#xC561;&#xC158;</th>
-            <th>&#xC0C1;&#xC138;</th>
-          </tr>
-        </thead>
-        <tbody id="events-body">
-          <tr><td colspan="5" class="empty-state">&#xC774;&#xBCA4;&#xD2B8; &#xC5C6;&#xC74C;</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Versions tab -->
-  <div class="tab-pane" id="pane-versions">
-    <div class="section-title">Claude Code &#xBC84;&#xC804;</div>
-    <div class="versions-grid" id="versions-grid">
-      <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
-    </div>
-    <div class="install-form">
-      <div class="form-group">
-        <label class="form-label" for="install-ver-input">&#xBC84;&#xC804; &#xBC88;&#xD638; (&#xC608;: 2.1.104)</label>
-        <input class="form-input" id="install-ver-input" type="text" placeholder="2.1.104">
-      </div>
-      <button class="btn-primary" onclick="installVersion()">&#xC124;&#xCE58;</button>
-    </div>
-  </div>
-
-  <!-- Config tab -->
-  <div class="tab-pane" id="pane-config">
-    <div class="section-title">&#xD604;&#xC7AC; &#xC124;&#xC815; (&#xC77D;&#xAE30; &#xC804;&#xC6A9;)</div>
-    <div id="config-content">
-      <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
-    </div>
-  </div>
-
-  <!-- Troubleshoot tab -->
-  <div class="tab-pane" id="pane-troubleshoot">
-    <div class="ts-select-row">
-      <select class="ts-select" id="ts-bot-select" onchange="loadTroubleshoot()">
-        <option value="">&#xBD07; &#xC120;&#xD0DD;&#x2026;</option>
-      </select>
-      <label class="ts-auto-label">
-        <input type="checkbox" id="ts-auto" checked onchange="toggleTsAuto()">
-        5&#xCD08; &#xC790;&#xB3D9; &#xAC31;&#xC2E0;
-      </label>
-      <button class="btn btn-logs btn-sm" onclick="loadTroubleshoot()">&#xC218;&#xB3D9; &#xAC31;&#xC2E0;</button>
-    </div>
-    <div class="ts-grid" id="ts-grid">
-      <div class="empty-state" style="grid-column:1/-1">&#xBD07;&#xC744; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
-    </div>
-  </div>
-
-</main>
-
-<!-- Add Bot Modal -->
-<div id="addBotModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-      <h3 style="margin:0;font-size:16px">&#xBD07; &#xCD94;&#xAC00;</h3>
-      <button onclick="closeAddBotModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">ID <span style="color:#f85149">*</span></label>
-        <input id="add-bot-id" placeholder="my-bot" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
-      </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xD0C0;&#xC785;</label>
-        <select id="add-bot-type" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
-          <option value="telegram">telegram</option>
-          <option value="discord">discord</option>
+    <!-- Events tab -->
+    <div class="tab-pane" id="pane-events">
+      <div class="section-title">&#xCD5C;&#xADFC; &#xC774;&#xBCA4;&#xD2B8; (&#xCD5C;&#xB300; 50&#xAC1C;)</div>
+      <div class="events-filter-row">
+        <select class="filter-select" id="ev-filter-action" onchange="applyEventFilters()">
+          <option value="">&#xBAA8;&#xB4E0; &#xC561;&#xC158;</option>
+          <option value="started">started</option>
+          <option value="stopped">stopped</option>
+          <option value="failed">failed</option>
+          <option value="error">error</option>
+          <option value="restarted">restarted</option>
+          <option value="restart_requested">restart_requested</option>
+          <option value="message">message</option>
+        </select>
+        <select class="filter-select" id="ev-filter-bot" onchange="applyEventFilters()">
+          <option value="">&#xBAA8;&#xB4E0; &#xBD07;</option>
         </select>
       </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xC774;&#xB984;</label>
-        <input id="add-bot-name" placeholder="My Bot" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
+      <div class="events-card">
+        <table class="events-table">
+          <thead>
+            <tr>
+              <th style="width:110px">&#xACBD;&#xACFC;</th>
+              <th style="width:160px">&#xBD07; / &#xCC44;&#xB110;</th>
+              <th style="width:130px">&#xC561;&#xC158;</th>
+              <th>&#xC0C1;&#xC138;</th>
+            </tr>
+          </thead>
+          <tbody id="events-body">
+            <tr><td colspan="4" class="empty-state">&#xC774;&#xBCA4;&#xD2B8; &#xC5C6;&#xC74C;</td></tr>
+          </tbody>
+        </table>
       </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xD1A0;&#xD070; <span style="color:#f85149">*</span></label>
-        <input id="add-bot-token" placeholder="1234567890:AAF..." type="password" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
-      </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xBAA8;&#xB378; (&#xC120;&#xD0DD;)</label>
-        <input id="add-bot-model" placeholder="claude-opus-4-5" style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px">
-      </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px">&#xC2DC;&#xC2A4;&#xD15C; &#xD504;&#xB86C;&#xD504;&#xD2B8; (&#xC120;&#xD0DD;)</label>
-        <textarea id="add-bot-system-prompt" rows="3" placeholder="You are a helpful assistant..." style="width:100%;padding:7px 10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-size:13px;resize:vertical"></textarea>
-      </div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-      <button onclick="closeAddBotModal()" style="padding:7px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#e6edf3;cursor:pointer;font-size:13px">&#xCDE8;&#xC18C;</button>
-      <button onclick="submitAddBot()" style="padding:7px 16px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:600">&#xCD94;&#xAC00;</button>
-    </div>
-  </div>
-</div>
-
-<!-- Memory Modal -->
-<div id="memoryModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:860px;width:95%;max-height:85vh;display:flex;flex-direction:column">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 id="memoryModalTitle" style="margin:0;font-size:16px">&#xBA54;&#xBAA8;&#xB9AC;</h3>
-      <button onclick="closeMemoryModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
-    </div>
-    <div style="display:flex;gap:16px;flex:1;min-height:0;overflow:hidden">
-      <div style="width:200px;flex-shrink:0;border:1px solid #21262d;border-radius:8px;overflow-y:auto;background:#0d1117">
-        <div style="padding:8px 10px;font-size:11px;color:#8b949e;border-bottom:1px solid #21262d;font-weight:600">&#xC0AC;&#xC6A9;&#xC790;</div>
-        <div id="memory-user-list" style="padding:4px 0"></div>
-      </div>
-      <div style="flex:1;border:1px solid #21262d;border-radius:8px;overflow-y:auto;background:#0d1117;padding:12px">
-        <div id="memory-list" style="font-size:13px;color:#8b949e">&#xC0AC;&#xC6A9;&#xC790;&#xB97C; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Access Modal -->
-<div id="accessModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:center;align-items:center">
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 id="accessModalTitle" style="margin:0;font-size:16px"></h3>
-      <button onclick="closeAccessModal()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:18px">&#x2715;</button>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px">
-        <h4 style="margin:0 0 8px;font-size:13px">&#xD5C8;&#xC6A9; &#xC0AC;&#xC6A9;&#xC790; (DM)</h4>
-        <div id="modal-access-users"></div>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input id="modal-new-user-id" placeholder="User ID" style="flex:1;padding:5px 8px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
-          <button onclick="addUser()" style="padding:4px 10px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px">&#xCD94;&#xAC00;</button>
+    <!-- Versions tab -->
+    <div class="tab-pane" id="pane-versions">
+      <div class="section-title">Claude Code &#xBC84;&#xC804;</div>
+      <div class="versions-grid" id="versions-grid">
+        <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
+      </div>
+      <div class="install-form">
+        <div class="form-group">
+          <label class="form-label" for="install-ver-input">&#xBC84;&#xC804; &#xBC88;&#xD638; (&#xC608;: 2.1.104)</label>
+          <input class="form-input" id="install-ver-input" type="text" placeholder="2.1.104">
         </div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px">
-        <h4 style="margin:0 0 8px;font-size:13px">&#xD5C8;&#xC6A9; &#xADF8;&#xB8F9;</h4>
-        <div id="modal-access-groups"></div>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input id="modal-new-group-id" placeholder="Chat ID (-100...)" style="flex:1;padding:5px 8px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
-          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#8b949e;white-space:nowrap"><input type="checkbox" id="modal-new-group-mention"> &#xBA58;&#xC158;</label>
-          <button onclick="addGroup()" style="padding:4px 10px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px">&#xCD94;&#xAC00;</button>
-        </div>
+        <button class="btn-primary" onclick="installVersion()">&#xC124;&#xCE58;</button>
       </div>
     </div>
 
-    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
-      <span style="font-size:13px">DM &#xC815;&#xCC45;:</span>
-      <select id="modal-dm-policy" onchange="updateDmPolicy()" style="padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px">
-        <option value="allowlist">allowlist</option>
-        <option value="pairing">pairing</option>
-        <option value="disabled">disabled</option>
-      </select>
-      <span id="modal-dm-policy-status" style="font-size:11px;color:#8b949e"></span>
-      <div style="flex:1"></div>
-      <button onclick="detectGroups()" style="padding:6px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
-    </div>
-
-    <div id="modal-pending" style="display:none;margin-bottom:16px">
-      <div style="background:#0d1117;border:1px solid #f0883e;border-radius:8px;padding:12px">
-        <h4 style="margin:0 0 8px;font-size:13px;color:#f0883e">&#xB300;&#xAE30; &#xC911;&#xC778; &#xD398;&#xC5B4;&#xB9C1; &#xC694;&#xCCAD;</h4>
-        <div id="modal-pending-list"></div>
+    <!-- Config tab -->
+    <div class="tab-pane" id="pane-config">
+      <div class="section-title">&#xD604;&#xC7AC; &#xC124;&#xC815; (&#xC77D;&#xAE30; &#xC804;&#xC6A9;)</div>
+      <div id="config-content">
+        <div class="empty-state">&#xB85C;&#xB529; &#xC911;&#x2026;</div>
       </div>
     </div>
-    <div id="modal-detect-results"></div>
-  </div>
+
+    <!-- Troubleshoot tab -->
+    <div class="tab-pane" id="pane-troubleshoot">
+      <div class="ts-select-row">
+        <select class="ts-select" id="ts-bot-select" onchange="loadTroubleshoot()">
+          <option value="">&#xBD07; &#xC120;&#xD0DD;&#x2026;</option>
+        </select>
+        <label class="ts-auto-label">
+          <input type="checkbox" id="ts-auto" checked onchange="toggleTsAuto()">
+          5&#xCD08; &#xC790;&#xB3D9; &#xAC31;&#xC2E0;
+        </label>
+        <button class="btn btn-logs btn-sm" onclick="loadTroubleshoot()">&#xC218;&#xB3D9; &#xAC31;&#xC2E0;</button>
+      </div>
+      <div id="ts-overall"></div>
+      <div class="ts-grid" id="ts-grid">
+        <div class="empty-state" style="grid-column:1/-1">&#xBD07;&#xC744; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
+      </div>
+    </div>
+
+  </main>
 </div>
 
 <!-- Log Modal -->
@@ -1494,16 +1571,133 @@ body {
   </div>
 </div>
 
+<!-- Add Bot Modal -->
+<div class="modal-overlay" id="addBotModal">
+  <div class="modal modal-narrow">
+    <div class="modal-header">
+      <div class="modal-title">&#xBD07; &#xCD94;&#xAC00;</div>
+      <button class="modal-close" onclick="closeAddBotModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="add-bot-form">
+        <div>
+          <label class="add-bot-label">ID <span class="req">*</span></label>
+          <input id="add-bot-id" class="add-bot-input" placeholder="my-bot">
+        </div>
+        <div>
+          <label class="add-bot-label">&#xD0C0;&#xC785;</label>
+          <select id="add-bot-type" class="add-bot-input">
+            <option value="telegram">telegram</option>
+            <option value="discord">discord</option>
+          </select>
+        </div>
+        <div>
+          <label class="add-bot-label">&#xC774;&#xB984;</label>
+          <input id="add-bot-name" class="add-bot-input" placeholder="My Bot">
+        </div>
+        <div>
+          <label class="add-bot-label">&#xD1A0;&#xD070; <span class="req">*</span></label>
+          <input id="add-bot-token" class="add-bot-input" placeholder="1234567890:AAF..." type="password">
+        </div>
+        <div>
+          <label class="add-bot-label">&#xBAA8;&#xB378; (&#xC120;&#xD0DD;)</label>
+          <input id="add-bot-model" class="add-bot-input" placeholder="claude-opus-4-5">
+        </div>
+        <div>
+          <label class="add-bot-label">&#xC2DC;&#xC2A4;&#xD15C; &#xD504;&#xB86C;&#xD504;&#xD2B8; (&#xC120;&#xD0DD;)</label>
+          <textarea id="add-bot-system-prompt" class="add-bot-textarea" rows="3" placeholder="You are a helpful assistant..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" style="color:var(--text);border-color:var(--border)" onclick="closeAddBotModal()">&#xCDE8;&#xC18C;</button>
+      <button class="btn-add" onclick="submitAddBot()">&#xCD94;&#xAC00;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Memory Modal -->
+<div class="modal-overlay" id="memoryModal">
+  <div class="modal modal-wide" style="height:70vh">
+    <div class="modal-header">
+      <div class="modal-title" id="memoryModalTitle">&#xBA54;&#xBAA8;&#xB9AC;</div>
+      <button class="modal-close" onclick="closeMemoryModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" style="display:flex;padding:0 16px 16px">
+      <div class="memory-layout" style="width:100%">
+        <div class="memory-sidebar">
+          <div class="memory-sidebar-header">&#xC0AC;&#xC6A9;&#xC790;</div>
+          <div id="memory-user-list"></div>
+        </div>
+        <div class="memory-content">
+          <div id="memory-list" style="font-size:13px;color:var(--text2)">&#xC0AC;&#xC6A9;&#xC790;&#xB97C; &#xC120;&#xD0DD;&#xD558;&#xC138;&#xC694;.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Access Modal -->
+<div class="modal-overlay" id="accessModal">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header">
+      <div class="modal-title" id="accessModalTitle"></div>
+      <button class="modal-close" onclick="closeAccessModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="access-grid">
+        <div class="access-panel">
+          <h4>&#xD5C8;&#xC6A9; &#xC0AC;&#xC6A9;&#xC790; (DM)</h4>
+          <div id="modal-access-users"></div>
+          <div class="access-add-row">
+            <input id="modal-new-user-id" class="access-input" placeholder="User ID">
+            <button class="access-btn-add" onclick="addUser()">&#xCD94;&#xAC00;</button>
+          </div>
+        </div>
+        <div class="access-panel">
+          <h4>&#xD5C8;&#xC6A9; &#xADF8;&#xB8F9;</h4>
+          <div id="modal-access-groups"></div>
+          <div class="access-add-row">
+            <input id="modal-new-group-id" class="access-input" placeholder="Chat ID (-100...)">
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);white-space:nowrap"><input type="checkbox" id="modal-new-group-mention"> &#xBA58;&#xC158;</label>
+            <button class="access-btn-add" onclick="addGroup()">&#xCD94;&#xAC00;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="access-policy-row">
+        <span style="font-size:13px">DM &#xC815;&#xCC45;:</span>
+        <select id="modal-dm-policy" class="access-policy-select" onchange="updateDmPolicy()">
+          <option value="allowlist">allowlist</option>
+          <option value="pairing">pairing</option>
+          <option value="disabled">disabled</option>
+        </select>
+        <span id="modal-dm-policy-status" style="font-size:11px;color:var(--text2)"></span>
+        <div style="flex:1"></div>
+        <button class="btn-primary" style="font-size:12px;padding:6px 12px" onclick="detectGroups()">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
+      </div>
+
+      <div id="modal-pending" style="display:none">
+        <div class="pending-panel">
+          <h4>&#xB300;&#xAE30; &#xC911;&#xC778; &#xD398;&#xC5B4;&#xB9C1; &#xC694;&#xCCAD;</h4>
+          <div id="modal-pending-list"></div>
+        </div>
+      </div>
+      <div id="modal-detect-results"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
 'use strict';
 
-// Tab switching
-document.querySelectorAll('.tab').forEach(function(tab) {
-  tab.addEventListener('click', function() {
-    var name = tab.dataset.tab;
-    document.querySelectorAll('.tab').forEach(function(t) {
-      t.classList.toggle('active', t.dataset.tab === name);
+// ===== Sidebar navigation =====
+document.querySelectorAll('.sidebar-item').forEach(function(item) {
+  item.addEventListener('click', function() {
+    var name = item.dataset.tab;
+    document.querySelectorAll('.sidebar-item').forEach(function(i) {
+      i.classList.toggle('active', i.dataset.tab === name);
     });
     document.querySelectorAll('.tab-pane').forEach(function(p) {
       p.classList.toggle('active', p.id === 'pane-' + name);
@@ -1512,11 +1706,29 @@ document.querySelectorAll('.tab').forEach(function(tab) {
     if (name === 'versions')     loadVersions();
     if (name === 'config')       loadConfig();
     if (name === 'troubleshoot') initTroubleshoot();
-    // 'access' tab removed — access is now per-bot modal
+    // Close mobile sidebar
+    document.getElementById('sidebar').classList.remove('mobile-open');
   });
 });
 
-// Helpers
+window.toggleMobileSidebar = function() {
+  document.getElementById('sidebar').classList.toggle('mobile-open');
+};
+
+// ===== Close all dropdowns on outside click =====
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.dropdown')) {
+    document.querySelectorAll('.dropdown-menu.open').forEach(function(m) {
+      m.classList.remove('open');
+    });
+  }
+  // Close mobile sidebar on outside click
+  if (!e.target.closest('.sidebar') && !e.target.closest('.mobile-menu-btn')) {
+    document.getElementById('sidebar').classList.remove('mobile-open');
+  }
+});
+
+// ===== Helpers =====
 function esc(s) {
   var d = document.createElement('div');
   d.textContent = String(s == null ? '' : s);
@@ -1554,7 +1766,17 @@ function stateLabel(state) {
   return map[state] || state || '\u2014';
 }
 
-// Bots
+window.toggleDropdown = function(btn, ev) {
+  if (ev) { ev.stopPropagation(); }
+  var menu = btn.nextElementSibling;
+  // Close all other dropdowns
+  document.querySelectorAll('.dropdown-menu.open').forEach(function(m) {
+    if (m !== menu) m.classList.remove('open');
+  });
+  menu.classList.toggle('open');
+};
+
+// ===== Bots =====
 function renderBots(bots) {
   var grid = document.getElementById('bot-grid');
   if (!bots || !bots.length) {
@@ -1578,19 +1800,37 @@ function renderBots(bots) {
     var name  = esc(b.name || b.id || '(unnamed)');
     var id    = b.name ? esc(b.id) : '';
     var bid   = esc(b.id);
+    var username = b.bot_username ? '<div class="bot-username">@' + esc(b.bot_username) + '</div>' : '';
     var channels = (b.channels || []).map(function(ch) {
       return '<span class="ch-chip">' + esc(ch.id || ch) + '</span>';
     }).join('');
     var channelSection = channels ? '<div class="channel-list">' + channels + '</div>' : '';
+
+    var claudeVer = '';
+    if (b.claude_version) {
+      claudeVer = '<span class="bot-claude-ver">Claude ' + esc(b.claude_version);
+      if (b.needs_restart) {
+        claudeVer += ' <span class="update-hint">&#x2192; ' + esc(b.system_version) + '</span>';
+      }
+      claudeVer += '</span>';
+    }
+
+    var updateBtn = '';
+    if (b.needs_restart) {
+      updateBtn = '<button class="btn btn-restart btn-sm" onclick="restartBot(\'' + bid + '\')" style="font-size:10px;padding:1px 8px;background:#f0883e;border-color:#f0883e;color:#fff">&#xC5C5;&#xB370;&#xC774;&#xD2B8;</button>';
+    }
 
     return (
       '<div class="bot-card">' +
         '<div class="bot-card-header">' +
           '<div class="bot-name-row">' +
             '<div class="bot-name">' + name + '</div>' +
+            username +
             (id ? '<div class="bot-id">' + id + '</div>' : '') +
           '</div>' +
-          '<span class="state-badge ' + cls + '">' + label + '</span>' +
+          '<div class="bot-header-right">' +
+            '<span class="state-badge ' + cls + '">' + label + '</span>' +
+          '</div>' +
         '</div>' +
         '<div class="bot-metrics">' +
           '<div class="bot-metric"><div class="m-val">' + esc(b.uptime || '\u2014') + '</div><div class="m-lbl">\uC5C5\uD0C0\uC784</div></div>' +
@@ -1598,19 +1838,24 @@ function renderBots(bots) {
           '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '\u2014') + '</div><div class="m-lbl">\uCC44\uB110</div></div>' +
         '</div>' +
         channelSection +
-        '<div style="padding:4px 16px;font-size:11px;color:#8b949e;display:flex;justify-content:space-between;align-items:center">' +
-          '<span>Claude ' + esc(b.claude_version || '-') + (b.needs_restart ? ' &#x2192; ' + esc(b.system_version) : '') + '</span>' +
-          (b.needs_restart ? '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')" style="font-size:10px;padding:1px 8px;background:#f0883e;border-color:#f0883e">&#xC5C5;&#xB370;&#xC774;&#xD2B8; &#xC7AC;&#xC2DC;&#xC791;</button>' : '') +
-        '</div>' +
         '<div class="bot-footer">' +
-          '<span class="bot-type">' + esc(b.type || 'unknown') + (b.bot_username ? ' @' + esc(b.bot_username) : '') + '</span>' +
-          '<div class="bot-actions">' +
+          '<div class="bot-footer-left">' +
+            '<span class="bot-type">' + esc(b.type || 'unknown') + '</span>' +
+            claudeVer +
+            updateBtn +
+          '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center">' +
             '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
-            '<button class="btn btn-logs"    onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</button>' +
-            '<button class="btn btn-status"  onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</button>' +
-            '<button class="btn btn-logs"    onclick="showAccessModal(\'' + bid + '\')">접근 관리</button>' +
-            '<button class="btn btn-status"  onclick="showMemoryModal(\'' + bid + '\')">메모리</button>' +
-            '<button class="btn" style="color:#f85149;border-color:rgba(248,81,73,.4)" onclick="deleteBot(\'' + bid + '\')">\uC0AD\uC81C</button>' +
+            '<div class="dropdown">' +
+              '<button class="dropdown-btn" onclick="toggleDropdown(this,event)">&#x22EF;</button>' +
+              '<div class="dropdown-menu">' +
+                '<div class="dropdown-item" onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</div>' +
+                '<div class="dropdown-item" onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</div>' +
+                '<div class="dropdown-item" onclick="showAccessModal(\'' + bid + '\')">&#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>' +
+                '<div class="dropdown-item" onclick="showMemoryModal(\'' + bid + '\')">&#xBA54;&#xBAA8;&#xB9AC;</div>' +
+                '<div class="dropdown-item danger" onclick="deleteBot(\'' + bid + '\')">\uC0AD\uC81C</div>' +
+              '</div>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -1618,12 +1863,42 @@ function renderBots(bots) {
   }).join('');
 }
 
-// Events
+// ===== Events =====
+var cachedEvents = [];
+
 function renderEvents(events) {
+  cachedEvents = events || [];
+  // Populate bot filter
+  var botFilter = document.getElementById('ev-filter-bot');
+  if (botFilter) {
+    var currentVal = botFilter.value;
+    var botIds = {};
+    cachedEvents.forEach(function(ev) { if (ev.bot_id) botIds[ev.bot_id] = true; });
+    var opts = '<option value="">&#xBAA8;&#xB4E0; &#xBD07;</option>';
+    Object.keys(botIds).forEach(function(bid) {
+      opts += '<option value="' + esc(bid) + '">' + esc(bid) + '</option>';
+    });
+    botFilter.innerHTML = opts;
+    botFilter.value = currentVal;
+  }
+  applyEventFilters();
+}
+
+window.applyEventFilters = function() {
+  var actionFilter = document.getElementById('ev-filter-action').value;
+  var botFilter = document.getElementById('ev-filter-bot').value;
   var tbody = document.getElementById('events-body');
-  var list  = (events || []).slice().reverse().slice(0, 50);
+  var list = (cachedEvents || []).slice().reverse().slice(0, 50);
+
+  if (actionFilter) {
+    list = list.filter(function(ev) { return (ev.action || 'message').toLowerCase() === actionFilter; });
+  }
+  if (botFilter) {
+    list = list.filter(function(ev) { return ev.bot_id === botFilter; });
+  }
+
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">\uC774\uBCA4\uD2B8 \uC5C6\uC74C</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">\uC774\uBCA4\uD2B8 \uC5C6\uC74C</td></tr>';
     return;
   }
   tbody.innerHTML = list.map(function(ev) {
@@ -1631,7 +1906,6 @@ function renderEvents(events) {
     var tagCls = ['started','stopped','failed','error','restarted','restart_requested'].indexOf(action) >= 0 ? action : 'message';
     return (
       '<tr>' +
-        '<td class="time-cell">' + esc(timeStr(ev.time)) + '</td>' +
         '<td class="time-cell">' + esc(relTime(ev.time)) + '</td>' +
         '<td class="id-cell">'  + esc(ev.bot_id || ev.channel_id || '\u2014') + '</td>' +
         '<td><span class="ev-tag ' + tagCls + '">' + esc(action) + '</span></td>' +
@@ -1639,9 +1913,9 @@ function renderEvents(events) {
       '</tr>'
     );
   }).join('');
-}
+};
 
-// Versions
+// ===== Versions =====
 function renderVersions(data) {
   var grid = document.getElementById('versions-grid');
   var list = data.versions || [];
@@ -1667,7 +1941,7 @@ function renderVersions(data) {
   }).join('');
 }
 
-// Config
+// ===== Config =====
 function renderConfig(data) {
   var el = document.getElementById('config-content');
   var sections = [
@@ -1716,7 +1990,7 @@ window.toggleSection = function(header) {
   icon.textContent = body.classList.contains('collapsed') ? '\u25BA' : '\u25BC';
 };
 
-// Troubleshoot
+// ===== Troubleshoot =====
 function initTroubleshoot() {
   fetch('/api/bots')
     .then(function(r) { return r.json(); })
@@ -1727,7 +2001,29 @@ function initTroubleshoot() {
         bots.map(function(b) {
           return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + '</option>';
         }).join('');
+      // Render overall status
+      renderTsOverall(bots);
     });
+}
+
+function renderTsOverall(bots) {
+  var el = document.getElementById('ts-overall');
+  if (!bots || !bots.length) { el.innerHTML = ''; return; }
+  var running = 0, failed = 0, total = bots.length;
+  bots.forEach(function(b) {
+    if (b.state === 'running') running++;
+    if (b.state === 'failed') failed++;
+  });
+  var statusColor = failed > 0 ? 'var(--yellow)' : (running === 0 ? 'var(--red)' : 'var(--green)');
+  var statusText = failed > 0 ? '\uC77C\uBD80 \uC624\uB958' : (running === 0 ? '\uB2E4\uC6B4' : '\uC815\uC0C1');
+  el.innerHTML =
+    '<div class="ts-overall">' +
+      '<div class="ts-overall-grid">' +
+        '<div class="ts-overall-item"><div class="ts-overall-val" style="color:' + statusColor + '">' + esc(statusText) + '</div><div class="ts-overall-lbl">&#xC804;&#xCCB4; &#xC0C1;&#xD0DC;</div></div>' +
+        '<div class="ts-overall-item"><div class="ts-overall-val">' + running + ' / ' + total + '</div><div class="ts-overall-lbl">&#xC2E4;&#xD589; &#xC911; / &#xC804;&#xCCB4;</div></div>' +
+        '<div class="ts-overall-item"><div class="ts-overall-val" style="color:' + (failed > 0 ? 'var(--red)' : 'var(--text3)') + '">' + failed + '</div><div class="ts-overall-lbl">&#xC624;&#xB958; &#xBD07;</div></div>' +
+      '</div>' +
+    '</div>';
 }
 
 window.loadTroubleshoot = function() {
@@ -1759,15 +2055,22 @@ window.loadTroubleshoot = function() {
     var errHtml = errEvents.length
       ? errEvents.map(function(e) {
           return '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border2)">' +
-                 '<span style="color:var(--text3);font-family:monospace">' + esc(timeStr(e.time)) + '</span> ' +
+                 '<span class="time-cell">' + esc(timeStr(e.time)) + '</span> ' +
                  esc(e.detail || '') + '</div>';
         }).join('')
       : '<div style="color:var(--text3);font-size:12px">\uCD5C\uADFC \uC624\uB958 \uC5C6\uC74C</div>';
 
+    // Last message time
+    var allBotEvents = (eventsData.events || []).filter(function(e) {
+      return e.bot_id === botId;
+    });
+    var lastMsgTime = allBotEvents.length > 0 ? relTime(allBotEvents[allBotEvents.length - 1].time) : '\uC5C6\uC74C';
+
     grid.innerHTML =
       '<div class="ts-card">' +
         '<div class="ts-card-header">\uC5F0\uACB0 \uC0C1\uD0DC</div>' +
-        '<div class="ts-card-body">' + connHtml + '</div>' +
+        '<div class="ts-card-body">' + connHtml +
+        '<div style="margin-top:8px;font-size:12px;color:var(--text3)">\uB9C8\uC9C0\uB9C9 \uC774\uBCA4\uD2B8: ' + esc(lastMsgTime) + '</div></div>' +
       '</div>' +
       '<div class="ts-card">' +
         '<div class="ts-card-header">\uCD5C\uADFC \uC624\uB958 \uC774\uBCA4\uD2B8</div>' +
@@ -1784,7 +2087,7 @@ window.loadTroubleshoot = function() {
 
 window.toggleTsAuto = function() {};
 
-// Health badge
+// ===== Health badge =====
 function updateHealth(status) {
   var badge = document.getElementById('health-badge');
   var text  = document.getElementById('health-text');
@@ -1798,16 +2101,22 @@ function updateHealth(status) {
   text.textContent = info[1];
 }
 
-// Modal
-function closeModal() {
-  document.getElementById('logModal').classList.remove('open');
+// ===== Modal helpers =====
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
 }
+function closeModalById(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+// Log modal
+function closeModal() { closeModalById('logModal'); }
 window.closeModal = closeModal;
 document.getElementById('logModal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
 
-// Actions
+// ===== Actions =====
 window.restartBot = function(id) {
   if (!confirm(id + ' \uBD07\uC744 \uC7AC\uC2DC\uC791\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + encodeURIComponent(id) + '/restart', { method: 'POST' })
@@ -1822,7 +2131,7 @@ window.restartBot = function(id) {
 window.showLogs = function(id) {
   document.getElementById('logTitle').textContent = id + ' \uB85C\uADF8';
   document.getElementById('logContent').textContent = '\uB85C\uB529 \uC911\u2026';
-  document.getElementById('logModal').classList.add('open');
+  openModal('logModal');
   fetch('/api/bots/' + encodeURIComponent(id) + '/logs?lines=200')
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -1878,7 +2187,7 @@ window.activateVersion = function(ver) {
     .catch(function(e) { alert('\uC624\uB958: ' + e); });
 };
 
-// Fetch
+// ===== Fetch =====
 var cachedBots = [];
 function loadBots() {
   fetch('/api/bots')
@@ -1917,7 +2226,7 @@ function loadConfig() {
     .catch(function() {});
 }
 
-// --- Access management modal (per-bot) ---
+// ===== Access management modal (per-bot) =====
 var currentAccess = null;
 var currentAccessBot = '';
 
@@ -1927,22 +2236,20 @@ window.showAccessModal = function(botId) {
   var sameCnt = 0;
   (cachedBots||[]).forEach(function(b){ if (b.id===botId) typeLabel=b.type; });
   (cachedBots||[]).forEach(function(b){ if (b.type===typeLabel) sameCnt++; });
-  var shared = sameCnt > 1 ? ' ('+typeLabel+' 봇 공유 설정)' : '';
-  document.getElementById('accessModalTitle').textContent = botId + ' 접근 관리' + shared;
+  var shared = sameCnt > 1 ? ' (' + typeLabel + ' \uBD07 \uACF5\uC720 \uC124\uC815)' : '';
+  document.getElementById('accessModalTitle').textContent = botId + ' \uC811\uADFC \uAD00\uB9AC' + shared;
   document.getElementById('modal-detect-results').innerHTML = '';
-  var modal = document.getElementById('accessModal');
-  modal.style.display = 'flex';
+  openModal('accessModal');
   loadAccess();
-  // Auto-refresh pending while modal is open
   if (window._accessInterval) clearInterval(window._accessInterval);
   window._accessInterval = setInterval(function() {
-    if (modal.style.display === 'flex') loadAccess();
+    if (document.getElementById('accessModal').classList.contains('open')) loadAccess();
     else clearInterval(window._accessInterval);
   }, 5000);
 };
 
 window.closeAccessModal = function() {
-  document.getElementById('accessModal').style.display = 'none';
+  closeModalById('accessModal');
   if (window._accessInterval) clearInterval(window._accessInterval);
 };
 
@@ -1959,43 +2266,39 @@ window.loadAccess = function() {
     var policyEl = document.getElementById('modal-dm-policy');
     if (!usersEl) return;
 
-    // DM policy
     if (policyEl && data.dmPolicy) policyEl.value = data.dmPolicy;
 
-    // Users
     var allowFrom = data.allowFrom || [];
     if (allowFrom.length === 0) {
-      usersEl.innerHTML = '<div style="color:#8b949e;font-size:12px">\uD5C8;&#xC6A9;\uB41C \uC0AC\uC6A9\uC790 \uC5C6\uC74C</div>';
+      usersEl.innerHTML = '<div style="color:var(--text2);font-size:12px">\uD5C8\uC6A9\uB41C \uC0AC\uC6A9\uC790 \uC5C6\uC74C</div>';
     } else {
       usersEl.innerHTML = allowFrom.map(function(uid) {
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #21262d">'
-          + '<span style="font-family:monospace;font-size:12px">' + esc(uid) + '</span>'
-          + '<button onclick="removeUser(\'' + esc(uid) + '\')" style="padding:2px 6px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uC0AD\uC81C</button>'
+        return '<div class="access-row">'
+          + '<span class="mono" style="font-size:12px">' + esc(uid) + '</span>'
+          + '<button class="access-btn-del" onclick="removeUser(\'' + esc(uid) + '\')">\uC0AD\uC81C</button>'
           + '</div>';
       }).join('');
     }
 
-    // Groups
     var groups = data.groups || {};
     var gids = Object.keys(groups);
     if (gids.length === 0) {
-      groupsEl.innerHTML = '<div style="color:#8b949e;font-size:12px">\uD5C8;\uC6A9;\uB41C \uADF8\uB8F9 \uC5C6\uC74C</div>';
+      groupsEl.innerHTML = '<div style="color:var(--text2);font-size:12px">\uD5C8\uC6A9\uB41C \uADF8\uB8F9 \uC5C6\uC74C</div>';
     } else {
       groupsEl.innerHTML = gids.map(function(gid) {
         var g = groups[gid];
         var mention = g.requireMention ? '\uBA58\uC158 \uD544\uC694' : '\uBAA8\uB4E0 \uBA54\uC2DC\uC9C0';
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #21262d">'
-          + '<span><span style="font-family:monospace;font-size:12px">' + esc(gid) + '</span> <span style="color:#8b949e;font-size:11px">(' + mention + ')</span></span>'
-          + '<button onclick="removeGroup(\'' + esc(gid) + '\')" style="padding:2px 6px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uC0AD\uC81C</button>'
+        return '<div class="access-row">'
+          + '<span><span class="mono" style="font-size:12px">' + esc(gid) + '</span> <span style="color:var(--text2);font-size:11px">(' + mention + ')</span></span>'
+          + '<button class="access-btn-del" onclick="removeGroup(\'' + esc(gid) + '\')">\uC0AD\uC81C</button>'
           + '</div>';
       }).join('');
     }
-    // Pending pairings
+
     var pending = data.pending || {};
     var pendingEl = document.getElementById('modal-pending');
     var pendingListEl = document.getElementById('modal-pending-list');
     var codes = Object.keys(pending);
-    // Filter expired
     var now = Date.now();
     codes = codes.filter(function(c) { return (pending[c].expiresAt || 0) > now; });
     if (codes.length > 0) {
@@ -2004,38 +2307,38 @@ window.loadAccess = function() {
         var p = pending[code];
         var sender = p.senderId || '?';
         var chatId = p.chatId || '';
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
-          + '<span><span style="font-family:monospace;font-size:12px">코드: ' + esc(code) + '</span> — 발신자: <span style="font-weight:bold">' + esc(sender) + '</span>'
+        return '<div class="pending-row">'
+          + '<span><span class="mono" style="font-size:12px">\uCF54\uB4DC: ' + esc(code) + '</span> \u2014 \uBC1C\uC2E0\uC790: <span style="font-weight:bold">' + esc(sender) + '</span>'
           + (chatId ? ' (chat: ' + esc(chatId) + ')' : '') + '</span>'
           + '<span style="display:flex;gap:4px">'
-          + '<button onclick="approvePending(\'' + esc(code) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">승인</button>'
-          + '<button onclick="denyPending(\'' + esc(code) + '\')" style="padding:2px 8px;background:#da3633;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">거부</button>'
+          + '<button class="pending-btn-approve" onclick="approvePending(\'' + esc(code) + '\')">\uC2B9\uC778</button>'
+          + '<button class="pending-btn-deny" onclick="denyPending(\'' + esc(code) + '\')">\uAC70\uBD80</button>'
           + '</span></div>';
       }).join('');
     } else {
       pendingEl.style.display = 'none';
     }
   }).catch(function(){});
-}
+};
 
 window.approvePending = function(code) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'approve_pending', id:code})
   }).then(function(r){return r.json()}).then(function(data) {
-    if (data.status === 'updated') alert('승인 완료');
-    else alert('오류: ' + JSON.stringify(data));
+    if (data.status === 'updated') alert('\uC2B9\uC778 \uC644\uB8CC');
+    else alert('\uC624\uB958: ' + JSON.stringify(data));
     loadAccess();
-  }).catch(function(e){ alert('요청 실패: ' + e); });
-}
+  }).catch(function(e){ alert('\uC694\uCCAD \uC2E4\uD328: ' + e); });
+};
 
 window.denyPending = function(code) {
-  if (!confirm('이 요청을 거부하시겠습니까?')) return;
+  if (!confirm('\uC774 \uC694\uCCAD\uC744 \uAC70\uBD80\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'deny_pending', id:code})
   }).then(function(r){return r.json()}).then(function() {
     loadAccess();
-  }).catch(function(e){ alert('요청 실패: ' + e); });
-}
+  }).catch(function(e){ alert('\uC694\uCCAD \uC2E4\uD328: ' + e); });
+};
 
 window.addUser = function() {
   var uid = document.getElementById('modal-new-user-id').value.trim();
@@ -2046,14 +2349,14 @@ window.addUser = function() {
     document.getElementById('modal-new-user-id').value = '';
     loadAccess();
   });
-}
+};
 
 window.removeUser = function(uid) {
   if (!confirm(uid + ' \uC0AC\uC6A9\uC790\uB97C \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_user', id:uid})
   }).then(function(){loadAccess()});
-}
+};
 
 window.addGroup = function() {
   var gid = document.getElementById('modal-new-group-id').value.trim();
@@ -2066,14 +2369,14 @@ window.addGroup = function() {
     document.getElementById('modal-new-group-mention').checked = false;
     loadAccess();
   });
-}
+};
 
 window.removeGroup = function(gid) {
   if (!confirm(gid + ' \uADF8\uB8F9\uC744 \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_group', id:gid})
   }).then(function(){loadAccess()});
-}
+};
 
 window.updateDmPolicy = function() {
   var policy = document.getElementById('modal-dm-policy').value;
@@ -2085,7 +2388,7 @@ window.updateDmPolicy = function() {
     setTimeout(function(){ document.getElementById('modal-dm-policy-status').textContent = ''; }, 2000);
     loadAccess();
   });
-}
+};
 
 window.detectGroups = function() {
   if (!currentAccessBot) return;
@@ -2093,7 +2396,7 @@ window.detectGroups = function() {
   btn.disabled = true;
   btn.textContent = '\uAC10\uC9C0 \uC911... (\uBD07 \uC7AC\uC2DC\uC791\uB428)';
   var resultsEl = document.getElementById('modal-detect-results');
-  resultsEl.innerHTML = '<div style="color:#8b949e">\uBD07\uC744 \uBA48\uCD94\uACE0 \uB300\uAE30 \uC911\uC778 \uBA54\uC2DC\uC9C0\uB97C \uC218\uC9D1\uD569\uB2C8\uB2E4...</div>';
+  resultsEl.innerHTML = '<div style="color:var(--text2)">\uBD07\uC744 \uBA48\uCD94\uACE0 \uB300\uAE30 \uC911\uC778 \uBA54\uC2DC\uC9C0\uB97C \uC218\uC9D1\uD569\uB2C8\uB2E4...</div>';
 
   fetch('/api/bots/' + currentAccessBot + '/access/detect', {method:'POST'})
     .then(function(r){return r.json()})
@@ -2105,27 +2408,27 @@ window.detectGroups = function() {
       var users = data.users || [];
 
       if (groups.length === 0 && users.length === 0) {
-        resultsEl.innerHTML = '<div style="padding:12px;color:#8b949e;font-size:12px">\uAC10\uC9C0\uB41C \uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uC5C6\uC74C. \uBD07\uC5D0\uAC8C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B8 \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.</div>';
+        resultsEl.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:12px">\uAC10\uC9C0\uB41C \uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uC5C6\uC74C. \uBD07\uC5D0\uAC8C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B8 \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.</div>';
         return;
       }
 
       if (groups.length > 0) {
-        html += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uADF8\uB8F9</h4>';
+        html += '<div class="access-panel" style="margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uADF8\uB8F9</h4>';
         groups.forEach(function(g) {
-          var badge = g.known ? '<span style="color:#3fb950;font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button onclick="addDetectedGroup(\'' + esc(g.id) + '\')" style="padding:2px 6px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uD5C8\uC6A9</button>';
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
-            + '<span><span style="font-family:monospace;font-size:12px">' + esc(g.id) + '</span> <span style="color:#e6edf3">' + esc(g.title) + '</span> <span style="color:#8b949e;font-size:11px">(' + g.type + ')</span></span>'
+          var badge = g.known ? '<span style="color:var(--green);font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button class="access-btn-add" onclick="addDetectedGroup(\'' + esc(g.id) + '\')">\uD5C8\uC6A9</button>';
+          html += '<div class="access-row">'
+            + '<span><span class="mono" style="font-size:12px">' + esc(g.id) + '</span> <span style="color:var(--text)">' + esc(g.title) + '</span> <span style="color:var(--text2);font-size:11px">(' + g.type + ')</span></span>'
             + badge + '</div>';
         });
         html += '</div>';
       }
 
       if (users.length > 0) {
-        html += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uC0AC\uC6A9\uC790</h4>';
+        html += '<div class="access-panel"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uC0AC\uC6A9\uC790</h4>';
         users.forEach(function(u) {
-          var badge = u.known ? '<span style="color:#3fb950;font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button onclick="addDetectedUser(\'' + esc(u.id) + '\')" style="padding:2px 6px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">\uD5C8\uC6A9</button>';
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
-            + '<span><span style="font-family:monospace;font-size:12px">' + esc(u.id) + '</span> <span style="color:#e6edf3">' + esc(u.title) + '</span></span>'
+          var badge = u.known ? '<span style="color:var(--green);font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button class="access-btn-add" onclick="addDetectedUser(\'' + esc(u.id) + '\')">\uD5C8\uC6A9</button>';
+          html += '<div class="access-row">'
+            + '<span><span class="mono" style="font-size:12px">' + esc(u.id) + '</span> <span style="color:var(--text)">' + esc(u.title) + '</span></span>'
             + badge + '</div>';
         });
         html += '</div>';
@@ -2136,23 +2439,23 @@ window.detectGroups = function() {
     .catch(function(e) {
       btn.disabled = false;
       btn.textContent = '\uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uAC10\uC9C0';
-      resultsEl.innerHTML = '<div style="padding:12px;color:#f85149">\uAC10\uC9C0 \uC2E4\uD328: ' + e + '</div>';
+      resultsEl.innerHTML = '<div style="padding:12px;color:var(--red)">\uAC10\uC9C0 \uC2E4\uD328: ' + e + '</div>';
     });
-}
+};
 
 window.addDetectedGroup = function(gid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_group', id:gid, require_mention:false})
   }).then(function(){loadAccess();});
-}
+};
 
 window.addDetectedUser = function(uid) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add_user', id:uid})
   }).then(function(){loadAccess();});
-}
+};
 
-// Add Bot Modal
+// ===== Add Bot Modal =====
 window.showAddBotModal = function() {
   document.getElementById('add-bot-id').value = '';
   document.getElementById('add-bot-name').value = '';
@@ -2160,11 +2463,11 @@ window.showAddBotModal = function() {
   document.getElementById('add-bot-model').value = '';
   document.getElementById('add-bot-system-prompt').value = '';
   document.getElementById('add-bot-type').value = 'telegram';
-  document.getElementById('addBotModal').style.display = 'flex';
+  openModal('addBotModal');
 };
 
 window.closeAddBotModal = function() {
-  document.getElementById('addBotModal').style.display = 'none';
+  closeModalById('addBotModal');
 };
 
 document.getElementById('addBotModal').addEventListener('click', function(e) {
@@ -2214,19 +2517,19 @@ window.deleteBot = function(id) {
     .catch(function(e) { alert('\uC624\uB958: ' + e); });
 };
 
-// Memory Modal (per-bot)
+// ===== Memory Modal (per-bot) =====
 var currentMemoryBot = '';
 
 window.showMemoryModal = function(botId) {
   currentMemoryBot = botId;
-  document.getElementById('memoryModalTitle').textContent = botId + ' 메모리';
-  document.getElementById('memory-list').innerHTML = '<div style="color:#8b949e">사용자를 선택하세요</div>';
-  document.getElementById('memoryModal').style.display = 'flex';
+  document.getElementById('memoryModalTitle').textContent = botId + ' \uBA54\uBAA8\uB9AC';
+  document.getElementById('memory-list').innerHTML = '<div style="color:var(--text2)">\uC0AC\uC6A9\uC790\uB97C \uC120\uD0DD\uD558\uC138\uC694.</div>';
+  openModal('memoryModal');
   loadMemoryUsers();
 };
 
 window.closeMemoryModal = function() {
-  document.getElementById('memoryModal').style.display = 'none';
+  closeModalById('memoryModal');
 };
 
 document.getElementById('memoryModal').addEventListener('click', function(e) {
@@ -2238,13 +2541,13 @@ window.loadMemoryUsers = function() {
     var users = data.users || [];
     var el = document.getElementById('memory-user-list');
     if (!users.length) {
-      el.innerHTML = '<div style="color:#8b949e;font-size:12px;padding:8px">메모리 없음</div>';
+      el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
       return;
     }
     el.innerHTML = users.map(function(u) {
-      return '<div onclick="loadMemories(\'' + esc(u.user_id) + '\')" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #21262d;font-size:12px">'
-        + '<span style="font-family:monospace">' + esc(u.user_id) + '</span>'
-        + ' <span style="color:#8b949e">(' + u.count + '건)</span></div>';
+      return '<div class="memory-sidebar-item" onclick="loadMemories(\'' + esc(u.user_id) + '\')">'
+        + '<span class="mono">' + esc(u.user_id) + '</span>'
+        + ' <span style="color:var(--text2)">(' + u.count + '\uAC74)</span></div>';
     }).join('');
   });
 };
@@ -2254,32 +2557,32 @@ window.loadMemories = function(uid) {
     var el = document.getElementById('memory-list');
     var memories = data.memories || [];
     if (!memories.length) {
-      el.innerHTML = '<div style="color:#8b949e">메모리 없음</div>';
+      el.innerHTML = '<div style="color:var(--text2)">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
       return;
     }
-    el.innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">사용자: ' + esc(uid) + ' (' + memories.length + '건)</div>' +
+    el.innerHTML = '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">\uC0AC\uC6A9\uC790: ' + esc(uid) + ' (' + memories.length + '\uAC74)</div>' +
       memories.map(function(m) {
-        var typeColors = {preference:'#3fb950',context:'#58a6ff',correction:'#f85149',fact:'#d2a8ff',general:'#8b949e'};
-        var color = typeColors[m.type] || '#8b949e';
-        return '<div style="padding:8px;border:1px solid #21262d;border-radius:6px;margin-bottom:6px">'
-          + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        var typeColors = {preference:'var(--green)',context:'var(--blue)',correction:'var(--red)',fact:'var(--purple)',general:'var(--text2)'};
+        var color = typeColors[m.type] || 'var(--text2)';
+        return '<div class="memory-item">'
+          + '<div class="memory-item-header">'
           + '<span style="font-size:11px;color:' + color + ';font-weight:bold">' + esc(m.type || 'general') + '</span>'
-          + '<button onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="padding:1px 6px;background:#da3633;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:10px">삭제</button>'
+          + '<button class="access-btn-del" onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="font-size:10px">\uC0AD\uC81C</button>'
           + '</div>'
           + '<div style="margin-top:4px;font-size:13px">' + esc(m.content) + '</div>'
-          + '<div style="margin-top:4px;font-size:10px;color:#8b949e">가중치: ' + (m.weight||0).toFixed(1) + ' | 조회: ' + (m.accessCount||0) + '회 | ' + (m.createdAt||'').slice(0,10) + '</div>'
+          + '<div class="memory-item-meta">\uAC00\uC911\uCE58: ' + (m.weight||0).toFixed(1) + ' | \uC870\uD68C: ' + (m.accessCount||0) + '\uD68C | ' + (m.createdAt||'').slice(0,10) + '</div>'
           + '</div>';
       }).join('');
   });
 };
 
 window.deleteMemory = function(uid, mid) {
-  if (!confirm('이 메모리를 삭제하시겠습니까?')) return;
+  if (!confirm('\uC774 \uBA54\uBAA8\uB9AC\uB97C \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
   fetch('/api/bots/' + currentMemoryBot + '/memory/' + uid + '/' + mid, {method:'DELETE'})
     .then(function() { loadMemories(uid); });
 };
 
-// Init and auto-refresh
+// ===== Init and auto-refresh =====
 loadBots();
 setInterval(loadBots, 5000);
 setInterval(function() {
