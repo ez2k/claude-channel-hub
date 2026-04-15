@@ -391,6 +391,50 @@ type GateResult =
   | { action: 'drop' }
   | { action: 'pair'; code: string; isResend: boolean }
 
+// Track discovered but unapproved groups
+const DISCOVERED_FILE = join(STATE_DIR, 'discovered.json')
+
+interface DiscoveredGroup {
+  id: string
+  title: string
+  type: string
+  discoveredAt: string
+  lastSeen: string
+  seenBy: string // username of who triggered discovery
+}
+
+function loadDiscovered(): DiscoveredGroup[] {
+  try { return JSON.parse(readFileSync(DISCOVERED_FILE, 'utf8')) }
+  catch { return [] }
+}
+
+function saveDiscovered(groups: DiscoveredGroup[]): void {
+  mkdirSync(STATE_DIR, { recursive: true })
+  writeFileSync(DISCOVERED_FILE, JSON.stringify(groups, null, 2))
+}
+
+function recordDiscoveredGroup(groupId: string, title: string, type: string, senderId: string, username: string): void {
+  const groups = loadDiscovered()
+  const existing = groups.find(g => g.id === groupId)
+  if (existing) {
+    existing.lastSeen = new Date().toISOString()
+    existing.title = title || existing.title
+    if (username) existing.seenBy = username
+  } else {
+    groups.push({
+      id: groupId,
+      title: title || groupId,
+      type,
+      discoveredAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+      seenBy: username || senderId,
+    })
+  }
+  // Keep max 50
+  if (groups.length > 50) groups.splice(0, groups.length - 50)
+  saveDiscovered(groups)
+}
+
 function gate(ctx: Context): GateResult {
   const access = loadAccess()
   const pruned = pruneExpired(access)
@@ -436,7 +480,11 @@ function gate(ctx: Context): GateResult {
   if (chatType === 'group' || chatType === 'supergroup') {
     const groupId = String(ctx.chat!.id)
     const policy = access.groups[groupId]
-    if (!policy) return { action: 'drop' }
+    if (!policy) {
+      // Record discovered group for dashboard approval
+      recordDiscoveredGroup(groupId, ctx.chat!.title ?? '', chatType!, senderId, from.username ?? '')
+      return { action: 'drop' }
+    }
     const groupAllowFrom = policy.allowFrom ?? []
     const requireMention = policy.requireMention ?? true
     if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) {

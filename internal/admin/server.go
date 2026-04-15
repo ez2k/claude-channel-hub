@@ -299,6 +299,40 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET /api/bots/:id/access/discovered — list auto-discovered groups
+	if r.Method == http.MethodGet && len(parts) == 3 && parts[1] == "access" && parts[2] == "discovered" {
+		discoveredPath := filepath.Join(os.Getenv("HOME"), ".claude", "channels", "telegram-"+botID, "discovered.json")
+		data, err := os.ReadFile(discoveredPath)
+		if err != nil {
+			writeJSON(w, map[string]interface{}{"groups": []interface{}{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"groups":`))
+		w.Write(data)
+		w.Write([]byte(`}`))
+		return
+	}
+
+	// DELETE /api/bots/:id/access/discovered/:groupId — dismiss a discovered group
+	if r.Method == http.MethodDelete && len(parts) == 4 && parts[1] == "access" && parts[2] == "discovered" {
+		groupId := parts[3]
+		discoveredPath := filepath.Join(os.Getenv("HOME"), ".claude", "channels", "telegram-"+botID, "discovered.json")
+		data, _ := os.ReadFile(discoveredPath)
+		var groups []map[string]interface{}
+		json.Unmarshal(data, &groups)
+		var filtered []map[string]interface{}
+		for _, g := range groups {
+			if fmt.Sprint(g["id"]) != groupId {
+				filtered = append(filtered, g)
+			}
+		}
+		out, _ := json.MarshalIndent(filtered, "", "  ")
+		os.WriteFile(discoveredPath, out, 0644)
+		writeJSON(w, map[string]string{"status": "dismissed", "group": groupId})
+		return
+	}
+
 	// GET /api/bots/:id/memory — list users with memory for this bot
 	if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "memory" {
 		s.handleBotMemory(w, r, botID)
@@ -1862,6 +1896,7 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
           <div id="modal-pending-list"></div>
         </div>
       </div>
+      <div id="modal-discovered" style="margin-bottom:12px"></div>
       <div id="modal-detect-results"></div>
     </div>
   </div>
@@ -2499,6 +2534,40 @@ window.loadAccess = function() {
       pendingEl.style.display = 'none';
     }
   }).catch(function(){});
+
+  // Load discovered groups
+  fetch('/api/bots/' + currentAccessBot + '/access/discovered').then(function(r){return r.json()}).then(function(data) {
+    var el = document.getElementById('modal-discovered');
+    var groups = data.groups || [];
+    if (!groups.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div style="background:#0d1117;border:1px solid #f0883e;border-radius:8px;padding:12px">'
+      + '<h4 style="margin:0 0 8px;font-size:13px;color:#f0883e">발견된 그룹 (' + groups.length + '개)</h4>'
+      + groups.map(function(g) {
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d">'
+          + '<span><span style="font-family:monospace;font-size:12px">' + esc(g.id) + '</span> <span style="color:#e6edf3">' + esc(g.title || '') + '</span>'
+          + ' <span style="color:#8b949e;font-size:10px">by @' + esc(g.seenBy || '?') + '</span></span>'
+          + '<span style="display:flex;gap:4px">'
+          + '<button onclick="window.approveDiscovered(\'' + esc(g.id) + '\')" style="padding:2px 8px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">승인</button>'
+          + '<button onclick="window.dismissDiscovered(\'' + esc(g.id) + '\')" style="padding:2px 8px;background:#30363d;border:none;border-radius:4px;color:#8b949e;cursor:pointer;font-size:11px">무시</button>'
+          + '</span></div>';
+      }).join('')
+      + '</div>';
+  }).catch(function(){});
+};
+
+window.approveDiscovered = function(groupId) {
+  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add_group', id:groupId, require_mention:false})
+  }).then(function() {
+    // Remove from discovered
+    fetch('/api/bots/' + currentAccessBot + '/access/discovered/' + encodeURIComponent(groupId), {method:'DELETE'});
+    loadAccess();
+  });
+};
+
+window.dismissDiscovered = function(groupId) {
+  fetch('/api/bots/' + currentAccessBot + '/access/discovered/' + encodeURIComponent(groupId), {method:'DELETE'})
+    .then(function() { loadAccess(); });
 };
 
 window.approvePending = function(code) {
