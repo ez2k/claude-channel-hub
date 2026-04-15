@@ -89,10 +89,14 @@ func (p *Process) Start(ctx context.Context) error {
 	botDataDir := filepath.Join(home, ".claude-channel-hub", "data", p.bot.Config.ID)
 	os.MkdirAll(botDataDir, 0755)
 
-	sessDir := filepath.Join(botDataDir, ".claude", "sessions")
-	if entries, err := os.ReadDir(sessDir); err == nil && len(entries) > 0 {
+	// Check if bot has run before — use a marker file in bot data dir
+	markerFile := filepath.Join(botDataDir, ".session-started")
+	if _, err := os.Stat(markerFile); err == nil {
+		// Previous session exists → resume it
 		args = append(args, "--continue")
 	}
+	// Create marker after first launch
+	os.WriteFile(markerFile, []byte(time.Now().Format(time.RFC3339)), 0644)
 
 	// Channel mode
 	if p.bot.Config.PluginMarketplace != "" {
