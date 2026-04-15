@@ -2866,7 +2866,7 @@ document.getElementById('addSkillModal').addEventListener('click', function(e) {
   <div class="modal modal-wide" style="height:70vh">
     <div class="modal-header">
       <div class="modal-title" id="skillDetailTitle">\uC2A4\uD0AC</div>
-      <button class="modal-close" onclick="window.closeSkillDetailModal()">\u2715</button>
+      <button class="modal-close" onclick="window.closeSkillDetailModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
       <pre class="modal-log" id="skillDetailContent" style="white-space:pre-wrap;word-break:break-word"></pre>
@@ -2879,7 +2879,7 @@ document.getElementById('addSkillModal').addEventListener('click', function(e) {
   <div class="modal modal-narrow">
     <div class="modal-header">
       <div class="modal-title">\uC2A4\uD0AC \uCD94\uAC00</div>
-      <button class="modal-close" onclick="window.closeAddSkillModal()">\u2715</button>
+      <button class="modal-close" onclick="window.closeAddSkillModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
       <div class="add-bot-form">
