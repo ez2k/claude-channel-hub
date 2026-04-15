@@ -135,13 +135,14 @@ func (s *Supervisor) Stop() {
 func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 	delay := s.config.RestartDelay
 
-	for attempt := 1; attempt <= s.config.MaxRestarts+1; attempt++ {
+	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		log.Printf("🚀 [%s] Starting bot (attempt %d)...", entry.bot.Config.ID, attempt)
-		s.logEvent(entry.bot.Config.ID, "started", fmt.Sprintf("attempt %d", attempt))
+		entry.restartCount++
+		log.Printf("🚀 [%s] Starting bot (attempt %d)...", entry.bot.Config.ID, entry.restartCount)
+		s.logEvent(entry.bot.Config.ID, "started", fmt.Sprintf("attempt %d", entry.restartCount))
 
 		claudeBin := s.versionMgr.Resolve(entry.bot.Config.ClaudeVersion)
 		entry.bot.Process = bot.NewProcess(entry.bot, claudeBin)
@@ -152,31 +153,25 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 			entry.bot.RunningVersion = s.versionMgr.SystemVersion()
 			entry.bot.Username = fetchBotUsername(entry.bot.Config.Type, entry.bot.Config.Token)
 			log.Printf("✅ [%s] Bot process started (pid %d, claude %s, @%s)", entry.bot.Config.ID, entry.bot.Process.PID(), entry.bot.RunningVersion, entry.bot.Username)
+			// Reset backoff on successful start
+			delay = s.config.RestartDelay
 			entry.bot.Process.Wait()
 		}
 
 		if ctx.Err() != nil {
-			return // shutdown requested
+			return
 		}
 
-		// Process exited unexpectedly
-		if attempt > s.config.MaxRestarts {
-			break
-		}
-
-		entry.restartCount++
 		entry.lastRestart = time.Now()
-		log.Printf("⚠️  [%s] Process exited, restarting in %s (restart %d/%d)",
-			entry.bot.Config.ID, delay, entry.restartCount, s.config.MaxRestarts)
+		log.Printf("⚠️  [%s] Process exited, restarting in %s (restart %d)",
+			entry.bot.Config.ID, delay, entry.restartCount)
 		s.logEvent(entry.bot.Config.ID, "restarted", fmt.Sprintf("restart #%d", entry.restartCount))
 
 		select {
 		case <-time.After(delay):
 		case <-entry.restartCh:
-			// Manual restart — reset backoff
 			delay = s.config.RestartDelay
 			entry.restartCount = 0
-			attempt = 0 // will be incremented by loop
 			log.Printf("🔄 [%s] Manual restart triggered", entry.bot.Config.ID)
 			s.logEvent(entry.bot.Config.ID, "restarted", "manual restart — backoff reset")
 		case <-ctx.Done():
@@ -189,9 +184,6 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 			delay = s.config.RestartBackoffMax
 		}
 	}
-
-	log.Printf("🚫 [%s] Max restarts (%d) exceeded — giving up", entry.bot.Config.ID, s.config.MaxRestarts)
-	s.logEvent(entry.bot.Config.ID, "abandoned", fmt.Sprintf("max restarts %d reached", s.config.MaxRestarts))
 }
 
 func (s *Supervisor) healthCheck() {

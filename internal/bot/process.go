@@ -165,9 +165,12 @@ func (p *Process) Start(ctx context.Context) error {
 		os.Rename(logPath, logPath+".1")
 	}
 
-	shellCmd := fmt.Sprintf("%s; cd '%s'; %s",
+	// Auto-answer prompts: background loop sends Enter to this tmux session after delays
+	autoAnswer := fmt.Sprintf("(for d in 3 5 7 9; do sleep $d; tmux send-keys -t %s Enter 2>/dev/null; done) &", p.tmuxSession)
+	shellCmd := fmt.Sprintf("%s; cd '%s'; %s %s",
 		strings.Join(envExports, "; "),
 		botDataDir,
+		autoAnswer,
 		claudeCmd,
 	)
 
@@ -194,14 +197,7 @@ func (p *Process) Start(ctx context.Context) error {
 	// Log tmux output to file via pipe-pane
 	exec.Command("tmux", "pipe-pane", "-t", p.tmuxSession, "-o", fmt.Sprintf("cat >> %s", logPath)).Run()
 
-	// Auto-dismiss startup prompts after delays
-	// Send Enter (CR) to confirm development channel warning
-	go func() {
-		for _, d := range []int{2, 4, 6, 8} {
-			time.Sleep(time.Duration(d) * time.Second)
-			exec.Command("tmux", "send-keys", "-t", p.tmuxSession, "Enter").Run()
-		}
-	}()
+	// Auto-answer prompts is handled inside the shell command (autoAnswer)
 
 	// Monitor tmux session — detect when it exits
 	go func() {
