@@ -1696,17 +1696,14 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
 
     <!-- Skills tab -->
     <div class="tab-pane" id="pane-skills">
-      <div class="summary-row">
-        <div class="summary-card blue">
-          <div class="s-val" id="sum-skills">&#x2014;</div>
-          <div class="s-lbl">&#xC804;&#xCCB4; &#xC2A4;&#xD0AC;</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="section-title" style="margin:0">&#xC2A4;&#xD0AC;</div>
+          <span id="sum-skills" style="font-size:13px;color:var(--text2)"></span>
         </div>
-      </div>
-      <div class="section-bar">
-        <div class="section-title" style="margin:0">&#xC2A4;&#xD0AC; &#xBAA9;&#xB85D;</div>
         <button class="btn-add" onclick="window.showAddSkillModal()">+ &#xC2A4;&#xD0AC; &#xCD94;&#xAC00;</button>
       </div>
-      <div class="bot-grid" id="skill-grid">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px" id="skill-grid">
         <div class="empty-state">&#xB370;&#xC774;&#xD130; &#xB85C;&#xB529; &#xC911;&#x2026;</div>
       </div>
     </div>
@@ -2781,7 +2778,7 @@ setInterval(function() {
 window.loadSkills = function() {
   fetch('/api/skills').then(function(r) { return r.json(); }).then(function(data) {
     var skills = data.skills || [];
-    document.getElementById('sum-skills').textContent = data.total || 0;
+    document.getElementById('sum-skills').textContent = (data.total || 0) + '개';
     var grid = document.getElementById('skill-grid');
     if (!skills.length) {
       grid.innerHTML = '<div class="empty-state">\uC2A4\uD0AC \uC5C6\uC74C</div>';
@@ -2793,14 +2790,15 @@ window.loadSkills = function() {
     grid.innerHTML = skills.map(function(sk) {
       if (!(sk.category in catMap)) { catMap[sk.category] = catColors[colorIdx++ % catColors.length]; }
       var color = catMap[sk.category];
-      return '<div class="bot-card" style="cursor:pointer" onclick="window.viewSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">'
-        + '<div class="bot-card-header">'
-        + '<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:' + color + '20;color:' + color + '">' + esc(sk.category) + '</span>'
-        + '<button class="btn btn-logs btn-sm" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();window.deleteSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">\uC0AD\uC81C</button>'
+      var desc = sk.description || '';
+      if (desc.length > 60) desc = desc.substring(0, 60) + '...';
+      return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'#444c56\'" onmouseout="this.style.borderColor=\'var(--border)\'" onclick="window.viewSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:3px;background:' + color + '20;color:' + color + '">' + esc(sk.category) + '</span>'
+        + '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:2px 4px" onclick="event.stopPropagation();window.deleteSkill(\'' + esc(sk.category) + '\',\'' + esc(sk.name) + '\')">x</button>'
         + '</div>'
-        + '<div class="bot-name" style="margin-top:8px">' + esc(sk.name) + '</div>'
-        + '<div style="font-size:12px;color:var(--text2);margin-top:4px">' + esc(sk.description || '') + '</div>'
-        + (sk.version ? '<div style="font-size:11px;color:var(--text3);margin-top:4px">v' + esc(sk.version) + '</div>' : '')
+        + '<div style="font-size:14px;font-weight:600;margin-top:6px">' + esc(sk.name) + '</div>'
+        + '<div style="font-size:11px;color:var(--text2);margin-top:3px;line-height:1.4">' + esc(desc) + '</div>'
         + '</div>';
     }).join('');
   });
