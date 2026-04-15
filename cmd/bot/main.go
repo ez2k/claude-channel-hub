@@ -76,10 +76,15 @@ func main() {
 
 	go sv.Start(ctx)
 
-	adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil, versionMgr, cfg, *configPath)
-	if err := adminSrv.Start(ctx); err != nil {
-		log.Printf("Admin stopped: %v", err)
-	}
+	go func() {
+		adminSrv := admin.NewServer(cfg.Admin.Addr, sv, nil, versionMgr, cfg, *configPath)
+		if err := adminSrv.Start(ctx); err != nil {
+			log.Printf("Admin stopped: %v", err)
+		}
+	}()
+
+	// Block until signal
+	<-ctx.Done()
 }
 
 // buildBots creates bot.Bot objects from config, assigning channels to their bots.
