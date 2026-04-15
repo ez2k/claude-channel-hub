@@ -158,7 +158,9 @@ func (s *Supervisor) runBot(ctx context.Context, entry *botEntry) {
 			entry.bot.Process.Wait()
 		}
 
+		log.Printf("🔍 [%s] Wait() returned, ctx.Err()=%v", entry.bot.Config.ID, ctx.Err())
 		if ctx.Err() != nil {
+			log.Printf("🛑 [%s] Context cancelled, stopping runBot", entry.bot.Config.ID)
 			return
 		}
 

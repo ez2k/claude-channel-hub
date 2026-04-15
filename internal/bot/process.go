@@ -79,7 +79,7 @@ func (p *Process) Start(ctx context.Context) error {
 	exec.Command("tmux", "kill-session", "-t", p.tmuxSession).Run()
 
 	// Kill stale bun processes using the same bot token (prevents 409 Conflict)
-	killStaleBotProcesses(p.bot.Config.Token)
+	killStaleBotProcesses(p.bot.Config.Token, p.bot.Config.ID)
 
 	// Build claude command args
 	args := []string{"--dangerously-skip-permissions"}
@@ -286,41 +286,60 @@ func (p *Process) SessionName() string {
 	return p.tmuxSession
 }
 
-// killStaleBotProcesses finds and kills bun/node processes that have the given
-// bot token in their environment. This prevents Telegram 409 Conflict errors
-// from multiple processes polling the same token.
-func killStaleBotProcesses(token string) {
+// killStaleBotProcesses finds and kills bun/server.ts processes that could
+// conflict with this bot's Telegram token. Checks both environment variables
+// and the bot's state directory bot.pid file.
+func killStaleBotProcesses(token string, botID string) {
 	if token == "" {
 		return
 	}
-	// Short token prefix for matching (first 10 chars)
 	prefix := token
 	if len(prefix) > 10 {
 		prefix = prefix[:10]
 	}
-	// Find bun/node processes
-	out, err := exec.Command("bash", "-c",
-		fmt.Sprintf("ps aux | grep -E 'bun.*server|node.*claude' | grep -v grep | awk '{print $2}'")).Output()
-	if err != nil {
-		return
-	}
+
+	// 1. Kill any bun server.ts process with matching token in environment
+	out, _ := exec.Command("bash", "-c",
+		"ps aux | grep 'bun.*server' | grep -v grep | awk '{print $2}'").Output()
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
-		// Check if this process has our token in its environment
-		envData, err := os.ReadFile(fmt.Sprintf("/proc/%s/environ", line))
-		if err != nil {
+		var pid int
+		fmt.Sscanf(line, "%d", &pid)
+		if pid <= 0 {
 			continue
 		}
+		// Check environment for token
+		envData, _ := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
 		if strings.Contains(string(envData), prefix) {
-			var pid int
-			fmt.Sscanf(line, "%d", &pid)
-			if pid > 0 {
-				proc, err := os.FindProcess(pid)
-				if err == nil {
-					proc.Kill()
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill()
+			}
+			continue
+		}
+		// Check if this is an official plugin process reading from same .env
+		cwd, _ := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+		if strings.Contains(cwd, "telegram") {
+			// Read the .env in that directory to see if it has our token
+			envFile, _ := os.ReadFile(filepath.Join(cwd, ".env"))
+			if strings.Contains(string(envFile), prefix) {
+				if p, err := os.FindProcess(pid); err == nil {
+					p.Kill()
 				}
+			}
+		}
+	}
+
+	// 2. Kill stale process from bot.pid file
+	home, _ := os.UserHomeDir()
+	pidFile := filepath.Join(home, ".claude", "channels", "telegram-"+botID, "bot.pid")
+	if data, err := os.ReadFile(pidFile); err == nil {
+		var stalePid int
+		fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &stalePid)
+		if stalePid > 0 {
+			if p, err := os.FindProcess(stalePid); err == nil {
+				p.Kill()
 			}
 		}
 	}
