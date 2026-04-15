@@ -293,11 +293,7 @@ func (s *Server) handleBotAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// POST /api/bots/:id/access/detect
-	if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "access" && parts[2] == "detect" {
-		s.handleBotAccessDetect(w, r, botID)
-		return
-	}
+	// Detect is now automatic via discovered.json in the plugin
 
 	// GET /api/bots/:id/access/discovered — list auto-discovered groups
 	if r.Method == http.MethodGet && len(parts) == 3 && parts[1] == "access" && parts[2] == "discovered" {
@@ -610,125 +606,6 @@ func (s *Server) handleBotAccess(w http.ResponseWriter, r *http.Request, botID s
 	default:
 		http.Error(w, "method not allowed", 405)
 	}
-}
-
-func (s *Server) handleBotAccessDetect(w http.ResponseWriter, r *http.Request, botID string) {
-	botCfg := s.findBotConfig(botID)
-	if botCfg == nil {
-		http.Error(w, "bot not found", 404)
-		return
-	}
-	if botCfg.Type != "telegram" {
-		writeJSON(w, map[string]interface{}{"error": "detect only supported for telegram bots"})
-		return
-	}
-
-	// Stop the bot process (without auto-restart) so we can call getUpdates
-	s.sv.StopBot(botID)
-	time.Sleep(3 * time.Second) // wait for process to fully release polling
-
-	// Poll with 10s long-polling timeout — gives user time to send a message
-	detectClient := &http.Client{Timeout: 15 * time.Second}
-	resp, err := detectClient.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?limit=100&timeout=10", botCfg.Token))
-	if err != nil {
-		writeJSON(w, map[string]interface{}{"error": "getUpdates failed: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-
-	var tgResp struct {
-		OK     bool `json:"ok"`
-		Result []struct {
-			Message *struct {
-				Chat struct {
-					ID    int64  `json:"id"`
-					Title string `json:"title"`
-					Type  string `json:"type"`
-				} `json:"chat"`
-				From struct {
-					ID       int64  `json:"id"`
-					Username string `json:"username"`
-					Name     string `json:"first_name"`
-				} `json:"from"`
-			} `json:"message"`
-			MyChatMember *struct {
-				Chat struct {
-					ID    int64  `json:"id"`
-					Title string `json:"title"`
-					Type  string `json:"type"`
-				} `json:"chat"`
-			} `json:"my_chat_member"`
-		} `json:"result"`
-	}
-	json.Unmarshal(body, &tgResp)
-
-	// Load current access
-	accessPath := accessPathForBot(botCfg.Type, botID)
-	accessData, _ := os.ReadFile(accessPath)
-	var access map[string]interface{}
-	json.Unmarshal(accessData, &access)
-	knownGroups := map[string]bool{}
-	if g, ok := access["groups"].(map[string]interface{}); ok {
-		for gid := range g {
-			knownGroups[gid] = true
-		}
-	}
-	knownUsers := map[string]bool{}
-	if u, ok := access["allowFrom"].([]interface{}); ok {
-		for _, uid := range u {
-			knownUsers[fmt.Sprint(uid)] = true
-		}
-	}
-
-	type detected struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-		Type  string `json:"type"`
-		Known bool   `json:"known"`
-	}
-	seen := map[string]bool{}
-	var detectedGroups []detected
-	var detectedUsers []detected
-
-	for _, u := range tgResp.Result {
-		if u.Message != nil {
-			chat := u.Message.Chat
-			cid := fmt.Sprintf("%d", chat.ID)
-			if !seen[cid] {
-				seen[cid] = true
-				if chat.Type == "group" || chat.Type == "supergroup" {
-					detectedGroups = append(detectedGroups, detected{ID: cid, Title: chat.Title, Type: chat.Type, Known: knownGroups[cid]})
-				} else if chat.Type == "private" {
-					from := u.Message.From
-					uid := fmt.Sprintf("%d", from.ID)
-					name := from.Name
-					if from.Username != "" {
-						name = "@" + from.Username
-					}
-					detectedUsers = append(detectedUsers, detected{ID: uid, Title: name, Type: "private", Known: knownUsers[uid]})
-				}
-			}
-		}
-		if u.MyChatMember != nil {
-			chat := u.MyChatMember.Chat
-			cid := fmt.Sprintf("%d", chat.ID)
-			if !seen[cid] && (chat.Type == "group" || chat.Type == "supergroup") {
-				seen[cid] = true
-				detectedGroups = append(detectedGroups, detected{ID: cid, Title: chat.Title, Type: chat.Type, Known: knownGroups[cid]})
-			}
-		}
-	}
-
-	// Restart the bot after detection
-	s.sv.RestartBot(botID)
-
-	writeJSON(w, map[string]interface{}{
-		"bot":    botID,
-		"groups": detectedGroups,
-		"users":  detectedUsers,
-		"note":   "감지 완료, 봇 재시작됨",
-	})
 }
 
 // --- System API ---
@@ -1887,7 +1764,6 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
         </select>
         <span id="modal-dm-policy-status" style="font-size:11px;color:var(--text2)"></span>
         <div style="flex:1"></div>
-        <button class="btn-primary" style="font-size:12px;padding:6px 12px" onclick="detectGroups()">&#xADF8;&#xB8F9;/&#xC0AC;&#xC6A9;&#xC790; &#xAC10;&#xC9C0;</button>
       </div>
 
       <div id="modal-pending" style="display:none">
@@ -1897,7 +1773,6 @@ code, pre, .mono, .bot-id, .config-key, .config-val, .time-cell, .id-cell, .ch-c
         </div>
       </div>
       <div id="modal-discovered" style="margin-bottom:12px"></div>
-      <div id="modal-detect-results"></div>
     </div>
   </div>
 </div>
@@ -2453,7 +2328,6 @@ window.showAccessModal = function(botId) {
   (cachedBots||[]).forEach(function(b){ if (b.type===typeLabel) sameCnt++; });
   var shared = sameCnt > 1 ? ' (' + typeLabel + ' \uBD07 \uACF5\uC720 \uC124\uC815)' : '';
   document.getElementById('accessModalTitle').textContent = botId + ' \uC811\uADFC \uAD00\uB9AC' + shared;
-  document.getElementById('modal-detect-results').innerHTML = '';
   openModal('accessModal');
   loadAccess();
   if (window._accessInterval) clearInterval(window._accessInterval);
@@ -2637,71 +2511,6 @@ window.updateDmPolicy = function() {
     setTimeout(function(){ document.getElementById('modal-dm-policy-status').textContent = ''; }, 2000);
     loadAccess();
   });
-};
-
-window.detectGroups = function() {
-  if (!currentAccessBot) return;
-  var btn = event.target;
-  btn.disabled = true;
-  btn.textContent = '\uAC10\uC9C0 \uC911... (\uBD07 \uC7AC\uC2DC\uC791\uB428)';
-  var resultsEl = document.getElementById('modal-detect-results');
-  resultsEl.innerHTML = '<div style="color:var(--text2)">\uBD07\uC744 \uBA48\uCD94\uACE0 \uB300\uAE30 \uC911\uC778 \uBA54\uC2DC\uC9C0\uB97C \uC218\uC9D1\uD569\uB2C8\uB2E4...</div>';
-
-  fetch('/api/bots/' + currentAccessBot + '/access/detect', {method:'POST'})
-    .then(function(r){return r.json()})
-    .then(function(data) {
-      btn.disabled = false;
-      btn.textContent = '\uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uAC10\uC9C0';
-      var html = '';
-      var groups = data.groups || [];
-      var users = data.users || [];
-
-      if (groups.length === 0 && users.length === 0) {
-        resultsEl.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:12px">\uAC10\uC9C0\uB41C \uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uC5C6\uC74C. \uBD07\uC5D0\uAC8C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B8 \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.</div>';
-        return;
-      }
-
-      if (groups.length > 0) {
-        html += '<div class="access-panel" style="margin-bottom:8px"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uADF8\uB8F9</h4>';
-        groups.forEach(function(g) {
-          var badge = g.known ? '<span style="color:var(--green);font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button class="access-btn-add" onclick="addDetectedGroup(\'' + esc(g.id) + '\')">\uD5C8\uC6A9</button>';
-          html += '<div class="access-row">'
-            + '<span><span class="mono" style="font-size:12px">' + esc(g.id) + '</span> <span style="color:var(--text)">' + esc(g.title) + '</span> <span style="color:var(--text2);font-size:11px">(' + g.type + ')</span></span>'
-            + badge + '</div>';
-        });
-        html += '</div>';
-      }
-
-      if (users.length > 0) {
-        html += '<div class="access-panel"><h4 style="margin:0 0 8px;font-size:13px">\uAC10\uC9C0\uB41C \uC0AC\uC6A9\uC790</h4>';
-        users.forEach(function(u) {
-          var badge = u.known ? '<span style="color:var(--green);font-size:11px">\uB4F1\uB85D\uB428</span>' : '<button class="access-btn-add" onclick="addDetectedUser(\'' + esc(u.id) + '\')">\uD5C8\uC6A9</button>';
-          html += '<div class="access-row">'
-            + '<span><span class="mono" style="font-size:12px">' + esc(u.id) + '</span> <span style="color:var(--text)">' + esc(u.title) + '</span></span>'
-            + badge + '</div>';
-        });
-        html += '</div>';
-      }
-
-      resultsEl.innerHTML = html;
-    })
-    .catch(function(e) {
-      btn.disabled = false;
-      btn.textContent = '\uADF8\uB8F9/\uC0AC\uC6A9\uC790 \uAC10\uC9C0';
-      resultsEl.innerHTML = '<div style="padding:12px;color:var(--red)">\uAC10\uC9C0 \uC2E4\uD328: ' + e + '</div>';
-    });
-};
-
-window.addDetectedGroup = function(gid) {
-  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action:'add_group', id:gid, require_mention:false})
-  }).then(function(){loadAccess();});
-};
-
-window.addDetectedUser = function(uid) {
-  fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action:'add_user', id:uid})
-  }).then(function(){loadAccess();});
 };
 
 // ===== Add Bot Modal =====
