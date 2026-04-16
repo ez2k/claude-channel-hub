@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -202,9 +203,38 @@ func (s *Supervisor) healthCheck() {
 			continue
 		}
 
-		// Check if bot log file has been updated recently (indicates activity)
-		// If no activity for 10 minutes, the session is likely stale — restart
+		// Check context token usage — send /compact if too high
+		tmuxSess := "cch-" + e.bot.Config.ID
 		logPath := fmt.Sprintf("/tmp/claude-bot-%s.log", e.bot.Config.ID)
+		if data, err := os.ReadFile(logPath); err == nil {
+			content := string(data)
+			// Find last token count in log (e.g., "150000 tokens")
+			tokenCount := 0
+			for i := len(content) - 1; i > len(content)-5000 && i >= 0; i-- {
+				if i+10 < len(content) && content[i:i+6] == "tokens" {
+					// Walk back to find the number
+					j := i - 1
+					for j >= 0 && content[j] == ' ' {
+						j--
+					}
+					end := j + 1
+					for j >= 0 && content[j] >= '0' && content[j] <= '9' {
+						j--
+					}
+					if j+1 < end {
+						fmt.Sscanf(content[j+1:end], "%d", &tokenCount)
+					}
+					break
+				}
+			}
+			if tokenCount > 150000 && e.bot.Process.IsAlive() {
+				log.Printf("🗜️  [%s] Context high (%d tokens), sending /compact", e.bot.Config.ID, tokenCount)
+				s.logEvent(e.bot.Config.ID, "compact", fmt.Sprintf("%d tokens", tokenCount))
+				exec.Command("tmux", "send-keys", "-t", tmuxSess, "/compact", "Enter").Run()
+			}
+		}
+
+		// Check if bot log file has been updated recently (indicates activity)
 		if info, err := os.Stat(logPath); err == nil {
 			idle := time.Since(info.ModTime())
 			if idle > 10*time.Minute && e.bot.Process.IsAlive() {
