@@ -1828,11 +1828,11 @@ function esc(s) {
 function relTime(isoStr) {
   if (!isoStr) return '';
   var diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
-  if (diff < 5)    return '\uBC29\uAE08';
-  if (diff < 60)   return Math.floor(diff) + '\uCD08 \uC804';
-  if (diff < 3600) return Math.floor(diff / 60) + '\uBD84 \uC804';
-  if (diff < 86400) return Math.floor(diff / 3600) + '\uC2DC\uAC04 \uC804';
-  return Math.floor(diff / 86400) + '\uC77C \uC804';
+  if (diff < 5)    return '방금';
+  if (diff < 60)   return Math.floor(diff) + '초 전';
+  if (diff < 3600) return Math.floor(diff / 60) + '분 전';
+  if (diff < 86400) return Math.floor(diff / 3600) + '시간 전';
+  return Math.floor(diff / 86400) + '일 전';
 }
 
 function timeStr(isoStr) {
@@ -1848,12 +1848,12 @@ function stateClass(state) {
 
 function stateLabel(state) {
   var map = {
-    running: '\uC2E4\uD589 \uC911',
-    failed:  '\uC624\uB958',
-    idle:    '\uC720\uD734',
-    stopped: '\uC911\uC9C0\uB428'
+    running: '실행 중',
+    failed:  '오류',
+    idle:    '유휴',
+    stopped: '중지됨'
   };
-  return map[state] || state || '\u2014';
+  return map[state] || state || '—';
 }
 
 window.toggleDropdown = function(btn, ev) {
@@ -1870,7 +1870,7 @@ window.toggleDropdown = function(btn, ev) {
 function renderBots(bots) {
   var grid = document.getElementById('bot-grid');
   if (!bots || !bots.length) {
-    grid.innerHTML = '<div class="empty-state">\uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.</div>';
+    grid.innerHTML = '<div class="empty-state">봇이 없습니다.</div>';
     return;
   }
   var totalChannels = 0, running = 0, failed = 0;
@@ -1923,9 +1923,9 @@ function renderBots(bots) {
           '</div>' +
         '</div>' +
         '<div class="bot-metrics">' +
-          '<div class="bot-metric"><div class="m-val">' + esc(b.uptime || '\u2014') + '</div><div class="m-lbl">\uC5C5\uD0C0\uC784</div></div>' +
-          '<div class="bot-metric"><div class="m-val">' + esc(b.restart_count != null ? b.restart_count : '\u2014') + '</div><div class="m-lbl">\uC7AC\uC2DC\uC791</div></div>' +
-          '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '\u2014') + '</div><div class="m-lbl">\uCC44\uB110</div></div>' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.uptime || '—') + '</div><div class="m-lbl">업타임</div></div>' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.restart_count != null ? b.restart_count : '—') + '</div><div class="m-lbl">재시작</div></div>' +
+          '<div class="bot-metric"><div class="m-val">' + esc(b.channel_count != null ? b.channel_count : '—') + '</div><div class="m-lbl">채널</div></div>' +
         '</div>' +
         channelSection +
         '<div class="bot-footer">' +
@@ -1935,15 +1935,15 @@ function renderBots(bots) {
             updateBtn +
           '</div>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
-            '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">\uC7AC\uC2DC\uC791</button>' +
+            '<button class="btn btn-restart" onclick="restartBot(\'' + bid + '\')">재시작</button>' +
             '<div class="dropdown">' +
               '<button class="dropdown-btn" onclick="toggleDropdown(this,event)">&#x22EF;</button>' +
               '<div class="dropdown-menu">' +
-                '<div class="dropdown-item" onclick="showLogs(\'' + bid + '\')">\uB85C\uADF8 \uBCF4\uAE30</div>' +
-                '<div class="dropdown-item" onclick="checkStatus(\'' + bid + '\')">\uC0C1\uD0DC \uD655\uC778</div>' +
+                '<div class="dropdown-item" onclick="showLogs(\'' + bid + '\')">로그 보기</div>' +
+                '<div class="dropdown-item" onclick="checkStatus(\'' + bid + '\')">상태 확인</div>' +
                 '<div class="dropdown-item" onclick="showAccessModal(\'' + bid + '\')">&#xC811;&#xADFC; &#xAD00;&#xB9AC;</div>' +
                 '<div class="dropdown-item" onclick="showMemoryModal(\'' + bid + '\')">&#xBA54;&#xBAA8;&#xB9AC;</div>' +
-                '<div class="dropdown-item danger" onclick="deleteBot(\'' + bid + '\')">\uC0AD\uC81C</div>' +
+                '<div class="dropdown-item danger" onclick="deleteBot(\'' + bid + '\')">삭제</div>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -1988,7 +1988,7 @@ window.applyEventFilters = function() {
   }
 
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">\uC774\uBCA4\uD2B8 \uC5C6\uC74C</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">이벤트 없음</td></tr>';
     return;
   }
   tbody.innerHTML = list.map(function(ev) {
@@ -1997,7 +1997,7 @@ window.applyEventFilters = function() {
     return (
       '<tr>' +
         '<td class="time-cell">' + esc(relTime(ev.time)) + '</td>' +
-        '<td class="id-cell">'  + esc(ev.bot_id || ev.channel_id || '\u2014') + '</td>' +
+        '<td class="id-cell">'  + esc(ev.bot_id || ev.channel_id || '—') + '</td>' +
         '<td><span class="ev-tag ' + tagCls + '">' + esc(action) + '</span></td>' +
         '<td>' + esc(ev.detail || '') + '</td>' +
       '</tr>'
@@ -2010,13 +2010,13 @@ function renderVersions(data) {
   var grid = document.getElementById('versions-grid');
   var list = data.versions || [];
   if (!list.length) {
-    grid.innerHTML = '<div class="empty-state">\uC124\uCE58\uB41C \uBC84\uC804 \uC5C6\uC74C</div>';
+    grid.innerHTML = '<div class="empty-state">설치된 버전 없음</div>';
     return;
   }
   grid.innerHTML = list.map(function(v) {
     var isActive = v.active;
     var cardCls  = isActive ? 'version-card active-ver' : 'version-card';
-    var activateBtn = isActive ? '' : '<button class="btn btn-activate btn-sm" onclick="activateVersion(\'' + esc(v.version) + '\')">\uD65C\uC131\uD654</button>';
+    var activateBtn = isActive ? '' : '<button class="btn btn-activate btn-sm" onclick="activateVersion(\'' + esc(v.version) + '\')">활성화</button>';
     return (
       '<div class="' + cardCls + '">' +
         '<div class="version-tag">' +
@@ -2038,8 +2038,8 @@ function renderConfig(data) {
     { key: 'admin',      label: 'Admin' },
     { key: 'supervisor', label: 'Supervisor' },
     { key: 'claude',     label: 'Claude' },
-    { key: 'bots',       label: '\uBD07 (\uD1A0\uD070 \uB9C8\uC2A4\uD0B9)' },
-    { key: 'channels',   label: '\uCC44\uB110' },
+    { key: 'bots',       label: '봇 (토큰 마스킹)' },
+    { key: 'channels',   label: '채널' },
   ];
   el.innerHTML = sections.map(function(sec) {
     var val = data[sec.key];
@@ -2063,7 +2063,7 @@ function renderConfig(data) {
       '<div class="config-section">' +
         '<div class="config-section-header" onclick="toggleSection(this)">' +
           '<span class="config-section-title">' + esc(sec.label) + '</span>' +
-          '<span class="config-toggle">\u25BC</span>' +
+          '<span class="config-toggle">▼</span>' +
         '</div>' +
         '<div class="config-section-body">' +
           '<table class="config-table"><tbody>' + rows + '</tbody></table>' +
@@ -2077,7 +2077,7 @@ window.toggleSection = function(header) {
   var body = header.nextElementSibling;
   body.classList.toggle('collapsed');
   var icon = header.querySelector('.config-toggle');
-  icon.textContent = body.classList.contains('collapsed') ? '\u25BA' : '\u25BC';
+  icon.textContent = body.classList.contains('collapsed') ? '►' : '▼';
 };
 
 // ===== Troubleshoot =====
@@ -2087,7 +2087,7 @@ function initTroubleshoot() {
     .then(function(data) {
       var sel  = document.getElementById('ts-bot-select');
       var bots = data.bots || [];
-      sel.innerHTML = '<option value="">\uBD07 \uC120\uD0DD\u2026</option>' +
+      sel.innerHTML = '<option value="">봇 선택…</option>' +
         bots.map(function(b) {
           return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + '</option>';
         }).join('');
@@ -2105,7 +2105,7 @@ function renderTsOverall(bots) {
     if (b.state === 'failed') failed++;
   });
   var statusColor = failed > 0 ? 'var(--yellow)' : (running === 0 ? 'var(--red)' : 'var(--green)');
-  var statusText = failed > 0 ? '\uC77C\uBD80 \uC624\uB958' : (running === 0 ? '\uB2E4\uC6B4' : '\uC815\uC0C1');
+  var statusText = failed > 0 ? '일부 오류' : (running === 0 ? '다운' : '정상');
   el.innerHTML =
     '<div class="ts-overall">' +
       '<div class="ts-overall-grid">' +
@@ -2120,7 +2120,7 @@ window.loadTroubleshoot = function() {
   var botId = document.getElementById('ts-bot-select').value;
   if (!botId) return;
   var grid = document.getElementById('ts-grid');
-  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">\uB85C\uB529 \uC911\u2026</div>';
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">로딩 중…</div>';
 
   Promise.all([
     fetch('/api/bots/' + encodeURIComponent(botId) + '/status').then(function(r) { return r.json(); }),
@@ -2133,11 +2133,11 @@ window.loadTroubleshoot = function() {
 
     var dotCls   = statusData.connected ? 'conn-dot ok' : 'conn-dot err';
     var connText = statusData.connected
-      ? ('\u2705 \uC5F0\uACB0\uB428' + (statusData.bot_username ? ' (@' + esc(statusData.bot_username) + ')' : ''))
-      : ('\u274C \uC5F0\uACB0 \uC2E4\uD328' + (statusData.error ? ': ' + esc(statusData.error) : ''));
+      ? ('✅ 연결됨' + (statusData.bot_username ? ' (@' + esc(statusData.bot_username) + ')' : ''))
+      : ('❌ 연결 실패' + (statusData.error ? ': ' + esc(statusData.error) : ''));
     var connHtml = '<div class="conn-status"><span class="' + dotCls + '"></span>' + connText + '</div>';
 
-    var logText = logData.logs || logData.error || '(\uB85C\uADF8 \uC5C6\uC74C)';
+    var logText = logData.logs || logData.error || '(로그 없음)';
 
     var errEvents = (eventsData.events || []).filter(function(e) {
       return e.bot_id === botId && (e.action === 'error' || e.action === 'failed');
@@ -2148,30 +2148,30 @@ window.loadTroubleshoot = function() {
                  '<span class="time-cell">' + esc(timeStr(e.time)) + '</span> ' +
                  esc(e.detail || '') + '</div>';
         }).join('')
-      : '<div style="color:var(--text3);font-size:12px">\uCD5C\uADFC \uC624\uB958 \uC5C6\uC74C</div>';
+      : '<div style="color:var(--text3);font-size:12px">최근 오류 없음</div>';
 
     // Last message time
     var allBotEvents = (eventsData.events || []).filter(function(e) {
       return e.bot_id === botId;
     });
-    var lastMsgTime = allBotEvents.length > 0 ? relTime(allBotEvents[allBotEvents.length - 1].time) : '\uC5C6\uC74C';
+    var lastMsgTime = allBotEvents.length > 0 ? relTime(allBotEvents[allBotEvents.length - 1].time) : '없음';
 
     grid.innerHTML =
       '<div class="ts-card">' +
-        '<div class="ts-card-header">\uC5F0\uACB0 \uC0C1\uD0DC</div>' +
+        '<div class="ts-card-header">연결 상태</div>' +
         '<div class="ts-card-body">' + connHtml +
-        '<div style="margin-top:8px;font-size:12px;color:var(--text3)">\uB9C8\uC9C0\uB9C9 \uC774\uBCA4\uD2B8: ' + esc(lastMsgTime) + '</div></div>' +
+        '<div style="margin-top:8px;font-size:12px;color:var(--text3)">마지막 이벤트: ' + esc(lastMsgTime) + '</div></div>' +
       '</div>' +
       '<div class="ts-card">' +
-        '<div class="ts-card-header">\uCD5C\uADFC \uC624\uB958 \uC774\uBCA4\uD2B8</div>' +
+        '<div class="ts-card-header">최근 오류 이벤트</div>' +
         '<div class="ts-card-body">' + errHtml + '</div>' +
       '</div>' +
       '<div class="ts-card" style="grid-column:1/-1">' +
-        '<div class="ts-card-header">\uCD5C\uADFC \uB85C\uADF8 (50\uC904)</div>' +
+        '<div class="ts-card-header">최근 로그 (50줄)</div>' +
         '<div class="ts-card-body"><pre class="log-pre">' + esc(logText) + '</pre></div>' +
       '</div>';
   }).catch(function(err) {
-    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">\uB85C\uB529 \uC2E4\uD328: ' + esc(String(err)) + '</div>';
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">로딩 실패: ' + esc(String(err)) + '</div>';
   });
 };
 
@@ -2182,9 +2182,9 @@ function updateHealth(status) {
   var badge = document.getElementById('health-badge');
   var text  = document.getElementById('health-text');
   var map   = {
-    healthy:  ['healthy',  '\uC815\uC0C1'],
-    degraded: ['degraded', '\uC77C\uBD80 \uC624\uB958'],
-    down:     ['down',     '\uB2E4\uC6B4']
+    healthy:  ['healthy',  '정상'],
+    degraded: ['degraded', '일부 오류'],
+    down:     ['down',     '다운']
   };
   var info = map[status] || map['healthy'];
   badge.className = 'health-badge ' + info[0];
@@ -2208,27 +2208,27 @@ document.getElementById('logModal').addEventListener('click', function(e) {
 
 // ===== Actions =====
 window.restartBot = function(id) {
-  if (!confirm(id + ' \uBD07\uC744 \uC7AC\uC2DC\uC791\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm(id + ' 봇을 재시작하시겠습니까?')) return;
   fetch('/api/bots/' + encodeURIComponent(id) + '/restart', { method: 'POST' })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      alert(data.status || data.error || '\uC694\uCCAD \uC644\uB8CC');
+      alert(data.status || data.error || '요청 완료');
       loadBots();
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.showLogs = function(id) {
-  document.getElementById('logTitle').textContent = id + ' \uB85C\uADF8';
-  document.getElementById('logContent').textContent = '\uB85C\uB529 \uC911\u2026';
+  document.getElementById('logTitle').textContent = id + ' 로그';
+  document.getElementById('logContent').textContent = '로딩 중…';
   openModal('logModal');
   fetch('/api/bots/' + encodeURIComponent(id) + '/logs?lines=200')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      document.getElementById('logContent').textContent = data.logs || data.error || '(\uB85C\uADF8 \uC5C6\uC74C)';
+      document.getElementById('logContent').textContent = data.logs || data.error || '(로그 없음)';
     })
     .catch(function(e) {
-      document.getElementById('logContent').textContent = '\uC624\uB958: ' + e;
+      document.getElementById('logContent').textContent = '오류: ' + e;
     });
 };
 
@@ -2237,17 +2237,17 @@ window.checkStatus = function(id) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.connected) {
-        alert('\u2705 ' + (data.bot_username ? '@' + data.bot_username : id) + ' \uC5F0\uACB0\uB428');
+        alert('✅ ' + (data.bot_username ? '@' + data.bot_username : id) + ' 연결됨');
       } else {
-        alert('\u274C \uC5F0\uACB0 \uC2E4\uD328: ' + (data.error || '\uC54C \uC218 \uC5C6\uB294 \uC624\uB958'));
+        alert('❌ 연결 실패: ' + (data.error || '알 수 없는 오류'));
       }
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.installVersion = function() {
   var ver = document.getElementById('install-ver-input').value.trim();
-  if (!ver) { alert('\uBC84\uC804 \uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.'); return; }
+  if (!ver) { alert('버전 번호를 입력하세요.'); return; }
   fetch('/api/versions/install', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2255,10 +2255,10 @@ window.installVersion = function() {
   })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      alert(data.status ? (ver + ' \uC124\uCE58 \uC644\uB8CC') : ('\uC2E4\uD328: ' + (data.error || '')));
+      alert(data.status ? (ver + ' 설치 완료') : ('실패: ' + (data.error || '')));
       loadVersions();
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.activateVersion = function(ver) {
@@ -2269,12 +2269,12 @@ window.activateVersion = function(ver) {
   })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      var msg = ver + ' \uD65C\uC131\uD654\uB428.';
-      if (data.note) msg += '\n\u26A0\uFE0F ' + data.note;
+      var msg = ver + ' 활성화됨.';
+      if (data.note) msg += '\n⚠️ ' + data.note;
       alert(msg);
       loadVersions();
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 // ===== Fetch =====
@@ -2326,8 +2326,8 @@ window.showAccessModal = function(botId) {
   var sameCnt = 0;
   (cachedBots||[]).forEach(function(b){ if (b.id===botId) typeLabel=b.type; });
   (cachedBots||[]).forEach(function(b){ if (b.type===typeLabel) sameCnt++; });
-  var shared = sameCnt > 1 ? ' (' + typeLabel + ' \uBD07 \uACF5\uC720 \uC124\uC815)' : '';
-  document.getElementById('accessModalTitle').textContent = botId + ' \uC811\uADFC \uAD00\uB9AC' + shared;
+  var shared = sameCnt > 1 ? ' (' + typeLabel + ' 봇 공유 설정)' : '';
+  document.getElementById('accessModalTitle').textContent = botId + ' 접근 관리' + shared;
   openModal('accessModal');
   loadAccess();
   if (window._accessInterval) clearInterval(window._accessInterval);
@@ -2359,12 +2359,12 @@ window.loadAccess = function() {
 
     var allowFrom = data.allowFrom || [];
     if (allowFrom.length === 0) {
-      usersEl.innerHTML = '<div style="color:var(--text2);font-size:12px">\uD5C8\uC6A9\uB41C \uC0AC\uC6A9\uC790 \uC5C6\uC74C</div>';
+      usersEl.innerHTML = '<div style="color:var(--text2);font-size:12px">허용된 사용자 없음</div>';
     } else {
       usersEl.innerHTML = allowFrom.map(function(uid) {
         return '<div class="access-row">'
           + '<span class="mono" style="font-size:12px">' + esc(uid) + '</span>'
-          + '<button class="access-btn-del" onclick="removeUser(\'' + esc(uid) + '\')">\uC0AD\uC81C</button>'
+          + '<button class="access-btn-del" onclick="removeUser(\'' + esc(uid) + '\')">삭제</button>'
           + '</div>';
       }).join('');
     }
@@ -2372,14 +2372,14 @@ window.loadAccess = function() {
     var groups = data.groups || {};
     var gids = Object.keys(groups);
     if (gids.length === 0) {
-      groupsEl.innerHTML = '<div style="color:var(--text2);font-size:12px">\uD5C8\uC6A9\uB41C \uADF8\uB8F9 \uC5C6\uC74C</div>';
+      groupsEl.innerHTML = '<div style="color:var(--text2);font-size:12px">허용된 그룹 없음</div>';
     } else {
       groupsEl.innerHTML = gids.map(function(gid) {
         var g = groups[gid];
-        var mention = g.requireMention ? '\uBA58\uC158 \uD544\uC694' : '\uBAA8\uB4E0 \uBA54\uC2DC\uC9C0';
+        var mention = g.requireMention ? '멘션 필요' : '모든 메시지';
         return '<div class="access-row">'
           + '<span><span class="mono" style="font-size:12px">' + esc(gid) + '</span> <span style="color:var(--text2);font-size:11px">(' + mention + ')</span></span>'
-          + '<button class="access-btn-del" onclick="removeGroup(\'' + esc(gid) + '\')">\uC0AD\uC81C</button>'
+          + '<button class="access-btn-del" onclick="removeGroup(\'' + esc(gid) + '\')">삭제</button>'
           + '</div>';
       }).join('');
     }
@@ -2397,11 +2397,11 @@ window.loadAccess = function() {
         var sender = p.senderId || '?';
         var chatId = p.chatId || '';
         return '<div class="pending-row">'
-          + '<span><span class="mono" style="font-size:12px">\uCF54\uB4DC: ' + esc(code) + '</span> \u2014 \uBC1C\uC2E0\uC790: <span style="font-weight:bold">' + esc(sender) + '</span>'
+          + '<span><span class="mono" style="font-size:12px">코드: ' + esc(code) + '</span> — 발신자: <span style="font-weight:bold">' + esc(sender) + '</span>'
           + (chatId ? ' (chat: ' + esc(chatId) + ')' : '') + '</span>'
           + '<span style="display:flex;gap:4px">'
-          + '<button class="pending-btn-approve" onclick="approvePending(\'' + esc(code) + '\')">\uC2B9\uC778</button>'
-          + '<button class="pending-btn-deny" onclick="denyPending(\'' + esc(code) + '\')">\uAC70\uBD80</button>'
+          + '<button class="pending-btn-approve" onclick="approvePending(\'' + esc(code) + '\')">승인</button>'
+          + '<button class="pending-btn-deny" onclick="denyPending(\'' + esc(code) + '\')">거부</button>'
           + '</span></div>';
       }).join('');
     } else {
@@ -2448,19 +2448,19 @@ window.approvePending = function(code) {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'approve_pending', id:code})
   }).then(function(r){return r.json()}).then(function(data) {
-    if (data.status === 'updated') alert('\uC2B9\uC778 \uC644\uB8CC');
-    else alert('\uC624\uB958: ' + JSON.stringify(data));
+    if (data.status === 'updated') alert('승인 완료');
+    else alert('오류: ' + JSON.stringify(data));
     loadAccess();
-  }).catch(function(e){ alert('\uC694\uCCAD \uC2E4\uD328: ' + e); });
+  }).catch(function(e){ alert('요청 실패: ' + e); });
 };
 
 window.denyPending = function(code) {
-  if (!confirm('\uC774 \uC694\uCCAD\uC744 \uAC70\uBD80\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm('이 요청을 거부하시겠습니까?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'deny_pending', id:code})
   }).then(function(r){return r.json()}).then(function() {
     loadAccess();
-  }).catch(function(e){ alert('\uC694\uCCAD \uC2E4\uD328: ' + e); });
+  }).catch(function(e){ alert('요청 실패: ' + e); });
 };
 
 window.addUser = function() {
@@ -2475,7 +2475,7 @@ window.addUser = function() {
 };
 
 window.removeUser = function(uid) {
-  if (!confirm(uid + ' \uC0AC\uC6A9\uC790\uB97C \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm(uid + ' 사용자를 제거하시겠습니까?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_user', id:uid})
   }).then(function(){loadAccess()});
@@ -2495,7 +2495,7 @@ window.addGroup = function() {
 };
 
 window.removeGroup = function(gid) {
-  if (!confirm(gid + ' \uADF8\uB8F9\uC744 \uC81C\uAC70\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm(gid + ' 그룹을 제거하시겠습니까?')) return;
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove_group', id:gid})
   }).then(function(){loadAccess()});
@@ -2507,7 +2507,7 @@ window.updateDmPolicy = function() {
   fetch('/api/bots/' + currentAccessBot + '/access', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'set_dm_policy', id:policy})
   }).then(function() {
-    document.getElementById('modal-dm-policy-status').textContent = '\uC800\uC7A5\uB428 \u2713';
+    document.getElementById('modal-dm-policy-status').textContent = '저장됨 ✓';
     setTimeout(function(){ document.getElementById('modal-dm-policy-status').textContent = ''; }, 2000);
     loadAccess();
   });
@@ -2535,7 +2535,7 @@ document.getElementById('addBotModal').addEventListener('click', function(e) {
 window.submitAddBot = function() {
   var id    = document.getElementById('add-bot-id').value.trim();
   var token = document.getElementById('add-bot-token').value.trim();
-  if (!id || !token) { alert('ID\uC640 \uD1A0\uD070\uC740 \uD544\uC218\uC785\uB2C8\uB2E4.'); return; }
+  if (!id || !token) { alert('ID와 토큰은 필수입니다.'); return; }
   var payload = {
     id:            id,
     type:          document.getElementById('add-bot-type').value,
@@ -2555,24 +2555,24 @@ window.submitAddBot = function() {
         closeAddBotModal();
         loadBots();
       } else {
-        alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data)));
+        alert('실패: ' + (data.error || JSON.stringify(data)));
       }
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.deleteBot = function(id) {
-  if (!confirm(id + ' \uBD07\uC744 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?\n\uC774 \uC791\uC5C5\uC740 \uB418\uB3CC\uB9B4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.')) return;
+  if (!confirm(id + ' 봇을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) return;
   fetch('/api/bots/' + encodeURIComponent(id), { method: 'DELETE' })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'deleted') {
         loadBots();
       } else {
-        alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data)));
+        alert('실패: ' + (data.error || JSON.stringify(data)));
       }
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 // ===== Memory Modal (per-bot) =====
@@ -2580,8 +2580,8 @@ var currentMemoryBot = '';
 
 window.showMemoryModal = function(botId) {
   currentMemoryBot = botId;
-  document.getElementById('memoryModalTitle').textContent = botId + ' \uBA54\uBAA8\uB9AC';
-  document.getElementById('memory-list').innerHTML = '<div style="color:var(--text2)">\uC0AC\uC6A9\uC790\uB97C \uC120\uD0DD\uD558\uC138\uC694.</div>';
+  document.getElementById('memoryModalTitle').textContent = botId + ' 메모리';
+  document.getElementById('memory-list').innerHTML = '<div style="color:var(--text2)">사용자를 선택하세요.</div>';
   openModal('memoryModal');
   loadMemoryUsers();
 };
@@ -2599,13 +2599,13 @@ window.loadMemoryUsers = function() {
     var users = data.users || [];
     var el = document.getElementById('memory-user-list');
     if (!users.length) {
-      el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px">메모리 없음</div>';
       return;
     }
     el.innerHTML = users.map(function(u) {
       return '<div class="memory-sidebar-item" onclick="loadMemories(\'' + esc(u.user_id) + '\')">'
         + '<span class="mono">' + esc(u.user_id) + '</span>'
-        + ' <span style="color:var(--text2)">(' + u.count + '\uAC74)</span></div>';
+        + ' <span style="color:var(--text2)">(' + u.count + '건)</span></div>';
     }).join('');
   });
 };
@@ -2615,27 +2615,27 @@ window.loadMemories = function(uid) {
     var el = document.getElementById('memory-list');
     var memories = data.memories || [];
     if (!memories.length) {
-      el.innerHTML = '<div style="color:var(--text2)">\uBA54\uBAA8\uB9AC \uC5C6\uC74C</div>';
+      el.innerHTML = '<div style="color:var(--text2)">메모리 없음</div>';
       return;
     }
-    el.innerHTML = '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">\uC0AC\uC6A9\uC790: ' + esc(uid) + ' (' + memories.length + '\uAC74)</div>' +
+    el.innerHTML = '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">사용자: ' + esc(uid) + ' (' + memories.length + '건)</div>' +
       memories.map(function(m) {
         var typeColors = {preference:'var(--green)',context:'var(--blue)',correction:'var(--red)',fact:'var(--purple)',general:'var(--text2)'};
         var color = typeColors[m.type] || 'var(--text2)';
         return '<div class="memory-item">'
           + '<div class="memory-item-header">'
           + '<span style="font-size:11px;color:' + color + ';font-weight:bold">' + esc(m.type || 'general') + '</span>'
-          + '<button class="access-btn-del" onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="font-size:10px">\uC0AD\uC81C</button>'
+          + '<button class="access-btn-del" onclick="deleteMemory(\'' + esc(uid) + '\',\'' + esc(m.id) + '\')" style="font-size:10px">삭제</button>'
           + '</div>'
           + '<div style="margin-top:4px;font-size:13px">' + esc(m.content) + '</div>'
-          + '<div class="memory-item-meta">\uAC00\uC911\uCE58: ' + (m.weight||0).toFixed(1) + ' | \uC870\uD68C: ' + (m.accessCount||0) + '\uD68C | ' + (m.createdAt||'').slice(0,10) + '</div>'
+          + '<div class="memory-item-meta">가중치: ' + (m.weight||0).toFixed(1) + ' | 조회: ' + (m.accessCount||0) + '회 | ' + (m.createdAt||'').slice(0,10) + '</div>'
           + '</div>';
       }).join('');
   });
 };
 
 window.deleteMemory = function(uid, mid) {
-  if (!confirm('\uC774 \uBA54\uBAA8\uB9AC\uB97C \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm('이 메모리를 삭제하시겠습니까?')) return;
   fetch('/api/bots/' + currentMemoryBot + '/memory/' + uid + '/' + mid, {method:'DELETE'})
     .then(function() { loadMemories(uid); });
 };
@@ -2659,7 +2659,7 @@ window.loadSkills = function() {
     document.getElementById('sum-skills').textContent = (data.total || 0) + '개';
     var grid = document.getElementById('skill-grid');
     if (!skills.length) {
-      grid.innerHTML = '<div class="empty-state">\uC2A4\uD0AC \uC5C6\uC74C</div>';
+      grid.innerHTML = '<div class="empty-state">스킬 없음</div>';
       return;
     }
     var catColors = ['var(--blue)','var(--green)','var(--purple)','var(--yellow)','var(--red)'];
@@ -2690,7 +2690,7 @@ window.viewSkill = function(category, name) {
       document.getElementById('skillDetailContent').textContent = data.content || '';
       openModal('skillDetailModal');
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.closeSkillDetailModal = function() {
@@ -2698,14 +2698,14 @@ window.closeSkillDetailModal = function() {
 };
 
 window.deleteSkill = function(category, name) {
-  if (!confirm(category + '/' + name + ' \uC2A4\uD0AC\uC744 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?')) return;
+  if (!confirm(category + '/' + name + ' 스킬을 삭제하시겠습니까?')) return;
   fetch('/api/skills/' + encodeURIComponent(category) + '/' + encodeURIComponent(name), {method:'DELETE'})
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'deleted') { window.loadSkills(); }
-      else { alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data))); }
+      else { alert('실패: ' + (data.error || JSON.stringify(data))); }
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 window.showAddSkillModal = function() {
@@ -2723,14 +2723,14 @@ window.submitAddSkill = function() {
   var category = document.getElementById('add-skill-category').value.trim();
   var name = document.getElementById('add-skill-name').value.trim();
   var content = document.getElementById('add-skill-content').value.trim();
-  if (!category || !name || !content) { alert('\uCE74\uD14C\uACE0\uB9AC, \uC774\uB984, \uB0B4\uC6A9\uC740 \uD544\uC218\uC785\uB2C8\uB2E4.'); return; }
+  if (!category || !name || !content) { alert('카테고리, 이름, 내용은 필수입니다.'); return; }
   fetch('/api/skills', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({category:category, name:name, content:content})})
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'created') { window.closeAddSkillModal(); window.loadSkills(); }
-      else { alert('\uC2E4\uD328: ' + (data.error || JSON.stringify(data))); }
+      else { alert('실패: ' + (data.error || JSON.stringify(data))); }
     })
-    .catch(function(e) { alert('\uC624\uB958: ' + e); });
+    .catch(function(e) { alert('오류: ' + e); });
 };
 
 document.getElementById('skillDetailModal').addEventListener('click', function(e) { if (e.target === this) window.closeSkillDetailModal(); });
@@ -2743,7 +2743,7 @@ document.getElementById('addSkillModal').addEventListener('click', function(e) {
 <div class="modal-overlay" id="skillDetailModal">
   <div class="modal modal-wide" style="height:70vh">
     <div class="modal-header">
-      <div class="modal-title" id="skillDetailTitle">\uC2A4\uD0AC</div>
+      <div class="modal-title" id="skillDetailTitle">스킬</div>
       <button class="modal-close" onclick="window.closeSkillDetailModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
@@ -2756,28 +2756,28 @@ document.getElementById('addSkillModal').addEventListener('click', function(e) {
 <div class="modal-overlay" id="addSkillModal">
   <div class="modal modal-narrow">
     <div class="modal-header">
-      <div class="modal-title">\uC2A4\uD0AC \uCD94\uAC00</div>
+      <div class="modal-title">스킬 추가</div>
       <button class="modal-close" onclick="window.closeAddSkillModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
       <div class="add-bot-form">
         <div>
-          <label class="add-bot-label">\uCE74\uD14C\uACE0\uB9AC <span class="req">*</span></label>
+          <label class="add-bot-label">카테고리 <span class="req">*</span></label>
           <input id="add-skill-category" class="add-bot-input" placeholder="research">
         </div>
         <div>
-          <label class="add-bot-label">\uC774\uB984 <span class="req">*</span></label>
+          <label class="add-bot-label">이름 <span class="req">*</span></label>
           <input id="add-skill-name" class="add-bot-input" placeholder="my-skill">
         </div>
         <div>
-          <label class="add-bot-label">SKILL.md \uB0B4\uC6A9 <span class="req">*</span></label>
+          <label class="add-bot-label">SKILL.md 내용 <span class="req">*</span></label>
           <textarea id="add-skill-content" class="add-bot-textarea" rows="8" placeholder="---\nname: my-skill\ndescription: ...\n---\n\n# My Skill\n..."></textarea>
         </div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" style="color:var(--text);border-color:var(--border)" onclick="window.closeAddSkillModal()">\uCDE8\uC18C</button>
-      <button class="btn-add" onclick="window.submitAddSkill()">\uCD94\uAC00</button>
+      <button class="btn" style="color:var(--text);border-color:var(--border)" onclick="window.closeAddSkillModal()">취소</button>
+      <button class="btn-add" onclick="window.submitAddSkill()">추가</button>
     </div>
   </div>
 </div>
